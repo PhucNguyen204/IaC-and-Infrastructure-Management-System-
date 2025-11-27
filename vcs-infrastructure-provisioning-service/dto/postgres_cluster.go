@@ -301,3 +301,107 @@ type NodeSyncResult struct {
 	RowCount  int    `json:"row_count"`
 	SyncDelay string `json:"sync_delay"`
 }
+
+// TestConnectionRequest for testing database connection
+type TestConnectionRequest struct {
+	Database string `json:"database"` // optional, default postgres
+	Username string `json:"username"` // optional, default postgres
+	Password string `json:"password"` // optional, use cluster password
+}
+
+// TestConnectionResponse returns connection test result
+type TestConnectionResponse struct {
+	Success       bool   `json:"success"`
+	Message       string `json:"message"`
+	Latency       string `json:"latency"`
+	ServerVersion string `json:"server_version"`
+	NodeName      string `json:"node_name"`
+	NodeRole      string `json:"node_role"`
+	ConnectionURL string `json:"connection_url,omitempty"`
+}
+
+// ConnectionInfoResponse returns detailed connection information
+type ConnectionInfoResponse struct {
+	ClusterID   string           `json:"cluster_id"`
+	ClusterName string           `json:"cluster_name"`
+	Status      string           `json:"status"`
+	Endpoints   ConnectionDetails `json:"endpoints"`
+	Credentials CredentialsInfo  `json:"credentials"`
+	Databases   []string         `json:"databases"`
+}
+
+// ConnectionDetails contains all connection endpoints
+type ConnectionDetails struct {
+	// HAProxy endpoints (recommended for apps)
+	HAProxy HAProxyEndpoint `json:"haproxy"`
+	// Direct node connections
+	Primary  DirectEndpoint   `json:"primary"`
+	Replicas []DirectEndpoint `json:"replicas"`
+}
+
+// HAProxyEndpoint for load-balanced connections
+type HAProxyEndpoint struct {
+	Host          string `json:"host"`
+	WritePort     int    `json:"write_port"`      // Port for read-write (primary)
+	ReadPort      int    `json:"read_port"`       // Port for read-only (replicas)
+	StatsPort     int    `json:"stats_port"`      // HAProxy stats page
+	WriteURL      string `json:"write_url"`       // Connection string for writes
+	ReadURL       string `json:"read_url"`        // Connection string for reads
+	StatsURL      string `json:"stats_url"`       // Stats dashboard URL
+}
+
+// DirectEndpoint for direct node connection
+type DirectEndpoint struct {
+	NodeID        string `json:"node_id"`
+	NodeName      string `json:"node_name"`
+	Role          string `json:"role"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	ConnectionURL string `json:"connection_url"`
+	IsHealthy     bool   `json:"is_healthy"`
+}
+
+// CredentialsInfo contains connection credentials (masked)
+type CredentialsInfo struct {
+	Username     string `json:"username"`
+	PasswordHint string `json:"password_hint"` // e.g., "****word" or "Set during creation"
+	Database     string `json:"default_database"`
+}
+
+// TableInfo represents a database table
+type TableInfo struct {
+	Name       string `json:"name"`
+	Schema     string `json:"schema"`
+	RowCount   int64  `json:"row_count"`
+	Size       string `json:"size"`
+	Type       string `json:"type"` // table, view, materialized_view
+}
+
+// ColumnInfo represents a table column
+type ColumnInfo struct {
+	Name         string `json:"name"`
+	DataType     string `json:"data_type"`
+	IsNullable   bool   `json:"is_nullable"`
+	DefaultValue string `json:"default_value,omitempty"`
+	IsPrimaryKey bool   `json:"is_primary_key"`
+	IsForeignKey bool   `json:"is_foreign_key"`
+}
+
+// TableSchemaResponse returns table schema
+type TableSchemaResponse struct {
+	TableName   string       `json:"table_name"`
+	Schema      string       `json:"schema"`
+	Columns     []ColumnInfo `json:"columns"`
+	Indexes     []IndexInfo  `json:"indexes"`
+	RowCount    int64        `json:"row_count"`
+	Size        string       `json:"size"`
+}
+
+// IndexInfo represents a table index
+type IndexInfo struct {
+	Name       string   `json:"name"`
+	Columns    []string `json:"columns"`
+	IsUnique   bool     `json:"is_unique"`
+	IsPrimary  bool     `json:"is_primary"`
+	Type       string   `json:"type"` // btree, hash, gin, gist
+}

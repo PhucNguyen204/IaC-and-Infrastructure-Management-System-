@@ -4,56 +4,226 @@
   gap: 24px;
 }
 
-.metrics-header {
+.stack-metrics-tab.loading {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   align-items: center;
-  margin-bottom: 16px;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #64748b;
+}
+
+.stack-metrics-tab.loading .spin {
+  color: #3b82f6;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.metrics-header {
+  margin-bottom: 8px;
 }
 
 .metrics-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.metrics-header h3 svg {
+  color: #3b82f6;
+}
+
+.metrics-subtitle {
   margin: 0;
+  font-size: 14px;
+  color: #64748b;
+}
+
+/* Resource Selector */
+.resource-selector {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.resource-selector h4 {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.resource-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.resource-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: white;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 200px;
+}
+
+.resource-btn:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.resource-btn.active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.resource-icon {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+.resource-icon.postgres { color: #336791; }
+.resource-icon.nginx { color: #009639; }
+.resource-icon.docker { color: #2496ed; }
+
+.resource-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.resource-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.resource-type {
+  font-size: 12px;
+  color: #64748b;
+  text-transform: capitalize;
+}
+
+.resource-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.resource-status.healthy {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.resource-status.warning {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.resource-status.unhealthy {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.resource-status.unknown {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.monitored-badge {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+.resource-divider {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.resource-divider::before,
+.resource-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
+}
+
+.resource-divider span {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.no-resources {
+  width: 100%;
+  text-align: center;
+  padding: 20px;
+  color: #94a3b8;
+}
+
+.no-resources p {
+  margin: 0;
+}
+
+/* Select Resource Prompt */
+.select-resource-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  background: #f8fafc;
+  border: 2px dashed #e2e8f0;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.select-resource-prompt svg {
+  color: #cbd5e1;
+  margin-bottom: 16px;
+}
+
+.select-resource-prompt h3 {
+  margin: 0 0 8px;
   font-size: 18px;
   font-weight: 600;
-  color: #111827;
+  color: #1e293b;
 }
 
-.metrics-controls {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-}
-
-.metrics-controls select {
-  padding: 8px 12px;
-  border: 1px solid #E5E7EB;
-  border-radius: 6px;
+.select-resource-prompt p {
+  margin: 0;
   font-size: 14px;
-  background: white;
-  cursor: pointer;
-  outline: none;
+  color: #64748b;
+  max-width: 400px;
 }
 
-.auto-refresh {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: #6B7280;
-  cursor: pointer;
-  user-select: none;
-}
-
-.auto-refresh input[type="checkbox"] {
-  cursor: pointer;
-}
-
-.loading-metrics {
-  text-align: center;
-  padding: 60px 20px;
-  color: #9CA3AF;
-}
-
+/* Legacy styles for backwards compatibility */
 .metrics-section {
   background: #F9FAFB;
   border: 1px solid #E5E7EB;

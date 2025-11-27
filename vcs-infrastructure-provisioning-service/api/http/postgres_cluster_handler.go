@@ -827,3 +827,125 @@ func (h *PostgreSQLClusterHandler) TestReplication(c *gin.Context) {
 
 	c.JSON(http.StatusOK, result)
 }
+
+// TestConnection tests database connection
+// @Summary Test database connection
+// @Tags PostgreSQL Cluster
+// @Accept json
+// @Produce json
+// @Param id path string true "Cluster ID"
+// @Param request body dto.TestConnectionRequest false "Connection parameters"
+// @Success 200 {object} dto.TestConnectionResponse
+// @Router /api/v1/postgres/cluster/{id}/test-connection [post]
+func (h *PostgreSQLClusterHandler) TestConnection(c *gin.Context) {
+	clusterID := c.Param("id")
+
+	var req dto.TestConnectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Allow empty body
+		req = dto.TestConnectionRequest{}
+	}
+
+	result, err := h.clusterService.TestConnection(c.Request.Context(), clusterID, req)
+	if err != nil {
+		h.logger.Error("failed to test connection", zap.String("cluster_id", clusterID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// GetConnectionInfo returns detailed connection information
+// @Summary Get connection information
+// @Tags PostgreSQL Cluster
+// @Produce json
+// @Param id path string true "Cluster ID"
+// @Success 200 {object} dto.ConnectionInfoResponse
+// @Router /api/v1/postgres/cluster/{id}/connection-info [get]
+func (h *PostgreSQLClusterHandler) GetConnectionInfo(c *gin.Context) {
+	clusterID := c.Param("id")
+
+	info, err := h.clusterService.GetConnectionInfo(c.Request.Context(), clusterID)
+	if err != nil {
+		h.logger.Error("failed to get connection info", zap.String("cluster_id", clusterID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, info)
+}
+
+// GetTables lists all tables in a database
+// @Summary List database tables
+// @Tags PostgreSQL Cluster
+// @Produce json
+// @Param id path string true "Cluster ID"
+// @Param database path string true "Database name"
+// @Success 200 {array} dto.TableInfo
+// @Router /api/v1/postgres/cluster/{id}/databases/{database}/tables [get]
+func (h *PostgreSQLClusterHandler) GetTables(c *gin.Context) {
+	clusterID := c.Param("id")
+	database := c.Param("database")
+
+	tables, err := h.clusterService.GetTables(c.Request.Context(), clusterID, database)
+	if err != nil {
+		h.logger.Error("failed to get tables", zap.String("cluster_id", clusterID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, tables)
+}
+
+// GetTableSchema returns schema for a table
+// @Summary Get table schema
+// @Tags PostgreSQL Cluster
+// @Produce json
+// @Param id path string true "Cluster ID"
+// @Param database path string true "Database name"
+// @Param table path string true "Table name"
+// @Success 200 {object} dto.TableSchemaResponse
+// @Router /api/v1/postgres/cluster/{id}/databases/{database}/tables/{table}/schema [get]
+func (h *PostgreSQLClusterHandler) GetTableSchema(c *gin.Context) {
+	clusterID := c.Param("id")
+	database := c.Param("database")
+	table := c.Param("table")
+
+	schema, err := h.clusterService.GetTableSchema(c.Request.Context(), clusterID, database, table)
+	if err != nil {
+		h.logger.Error("failed to get table schema", zap.String("cluster_id", clusterID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, schema)
+}
+
+// GetTableData returns data from a table with pagination
+// @Summary Get table data
+// @Tags PostgreSQL Cluster
+// @Produce json
+// @Param id path string true "Cluster ID"
+// @Param database path string true "Database name"
+// @Param table path string true "Table name"
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Items per page" default(50)
+// @Success 200 {object} dto.QueryResult
+// @Router /api/v1/postgres/cluster/{id}/databases/{database}/tables/{table}/data [get]
+func (h *PostgreSQLClusterHandler) GetTableData(c *gin.Context) {
+	clusterID := c.Param("id")
+	database := c.Param("database")
+	table := c.Param("table")
+	page := c.DefaultQuery("page", "1")
+	limit := c.DefaultQuery("limit", "50")
+
+	data, err := h.clusterService.GetTableData(c.Request.Context(), clusterID, database, table, page, limit)
+	if err != nil {
+		h.logger.Error("failed to get table data", zap.String("cluster_id", clusterID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, data)
+}

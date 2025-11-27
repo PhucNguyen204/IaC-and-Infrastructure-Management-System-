@@ -16,7 +16,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+# Install dependencies: ca-certificates, docker-cli, curl, kubectl, k3d
+RUN apk --no-cache add ca-certificates curl docker-cli
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    chmod +x kubectl && \
+    mv kubectl /usr/local/bin/
+
+# Install k3d
+RUN curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.6.0 sh
 
 WORKDIR /app
 

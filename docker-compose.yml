@@ -152,15 +152,17 @@ services:
       HTTP_PORT: 8083
       GRPC_PORT: 50051
       JWT_SECRET: my-super-secret-jwt-key-for-iaas-system-2024
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./vcs-infrastructure-provisioning-service/logs:/app/logs
     depends_on:
       - postgres
       - redis
       - kafka
+    privileged: true
     networks:
       - iaas-network
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./vcs-infrastructure-provisioning-service/logs:/app/logs
 
   monitoring-service:
     build:

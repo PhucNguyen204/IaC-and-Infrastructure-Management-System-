@@ -18,6 +18,7 @@ function App() {
       setIsAuthenticated(true);
     }
     setLoading(false);
+    
   }, []);
 
   const handleLogin = (token) => {

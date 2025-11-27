@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Eye, Play, Square, RotateCcw, Trash2, MoreVertical, Clock, CheckCircle, XCircle, AlertCircle, Loader } from 'lucide-react';
 import { stackAPI } from '../api';
 import Layout from './common/Layout';
 import StatusBadge from './common/StatusBadge';
@@ -15,16 +15,7 @@ const StackDashboard = ({ onLogout, onViewStack }) => {
   const [filterEnvironment, setFilterEnvironment] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [stats, setStats] = useState({
-    totalStacks: 0,
-    runningStacks: 0,
-    issues: 0,
-    totalCost: 0,
-    databases: 0,
-    gateways: 0,
-    services: 0,
-    uptime: 99.8
-  });
+  const [actionLoading, setActionLoading] = useState({});
 
   useEffect(() => {
     loadStacks();
@@ -42,50 +33,17 @@ const StackDashboard = ({ onLogout, onViewStack }) => {
     try {
       setLoading(true);
       const response = await stackAPI.getAll();
-      console.log('Stack API response:', response.data);
-      // API returns { success, code, message, data: { stacks: [...], total_count, ... } }
       const stacksData = response.data?.data?.stacks || response.data?.stacks || [];
-      console.log('Parsed stacks:', stacksData);
       setStacks(stacksData);
-      calculateStats(stacksData);
     } catch (error) {
-      // Don't show error if it's 401 (handled by interceptor)
       if (error.response?.status !== 401) {
         console.error('Error loading stacks:', error);
-        console.error('Error response:', error.response?.data);
         toast.error('Failed to load stacks');
       }
       setStacks([]);
     } finally {
       setLoading(false);
     }
-  };
-
-  const calculateStats = (stacksData) => {
-    const running = stacksData.filter(s => s.status === 'running').length;
-    const issues = stacksData.filter(s => s.status === 'degraded' || s.status === 'failed').length;
-    
-    let databases = 0, gateways = 0, services = 0;
-    stacksData.forEach(stack => {
-      if (stack.resources) {
-        stack.resources.forEach(r => {
-          if (r.resource_type?.includes('POSTGRES')) databases++;
-          if (r.resource_type?.includes('NGINX')) gateways++;
-          if (r.resource_type?.includes('DOCKER')) services++;
-        });
-      }
-    });
-
-    setStats({
-      totalStacks: stacksData.length,
-      runningStacks: running,
-      issues: issues,
-      totalCost: 1245,
-      databases,
-      gateways,
-      services,
-      uptime: 99.8
-    });
   };
 
   const filteredStacks = stacks.filter(stack => {
@@ -103,52 +61,77 @@ const StackDashboard = ({ onLogout, onViewStack }) => {
     loadStacks();
   };
 
+  const handleStackAction = async (stackId, action) => {
+    setActionLoading(prev => ({ ...prev, [stackId]: action }));
+    try {
+      switch (action) {
+        case 'start':
+          await stackAPI.start(stackId);
+          toast.success('Stack started');
+          break;
+        case 'stop':
+          await stackAPI.stop(stackId);
+          toast.success('Stack stopped');
+          break;
+        case 'restart':
+          await stackAPI.restart(stackId);
+          toast.success('Stack restarting');
+          break;
+        case 'delete':
+          if (window.confirm('Are you sure you want to delete this stack?')) {
+            await stackAPI.delete(stackId);
+            toast.success('Stack deleted');
+          }
+          break;
+        default:
+          break;
+      }
+      loadStacks();
+    } catch (error) {
+      toast.error(`Failed to ${action} stack`);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [stackId]: null }));
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'running':
+        return <CheckCircle size={16} className="status-icon running" />;
+      case 'stopped':
+        return <Square size={16} className="status-icon stopped" />;
+      case 'creating':
+      case 'updating':
+        return <Loader size={16} className="status-icon creating spin" />;
+      case 'failed':
+        return <XCircle size={16} className="status-icon failed" />;
+      default:
+        return <AlertCircle size={16} className="status-icon unknown" />;
+    }
+  };
+
+  const getEnvBadgeClass = (env) => {
+    switch (env?.toLowerCase()) {
+      case 'production': return 'env-badge production';
+      case 'staging': return 'env-badge staging';
+      default: return 'env-badge development';
+    }
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   return (
     <Layout onLogout={onLogout} activeTab="stacks">
       <div className="stack-dashboard">
-        {/* System Overview */}
-        <div className="system-overview">
-          <h2>System Overview</h2>
-          <div className="stats-grid">
-            <div className="stat-card">
-              <ResourceIcon type="stack" size={24} />
-              <div className="stat-value">{stats.totalStacks}</div>
-              <div className="stat-label">Total Stacks</div>
-            </div>
-            <div className="stat-card stat-success">
-              <div className="stat-value">{stats.runningStacks}</div>
-              <div className="stat-label">Running</div>
-            </div>
-            <div className="stat-card stat-warning">
-              <div className="stat-value">{stats.issues}</div>
-              <div className="stat-label">Issues</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-value">${stats.totalCost}</div>
-              <div className="stat-label">Cost/month</div>
-            </div>
-            <div className="stat-card">
-              <ResourceIcon type="database" size={24} />
-              <div className="stat-value">{stats.databases}</div>
-              <div className="stat-label">Databases</div>
-            </div>
-            <div className="stat-card">
-              <ResourceIcon type="gateway" size={24} />
-              <div className="stat-value">{stats.gateways}</div>
-              <div className="stat-label">Gateways</div>
-            </div>
-            <div className="stat-card">
-              <ResourceIcon type="container" size={24} />
-              <div className="stat-value">{stats.services}</div>
-              <div className="stat-label">Services</div>
-            </div>
-            <div className="stat-card stat-success">
-              <div className="stat-value">{stats.uptime}%</div>
-              <div className="stat-label">Uptime (30d)</div>
-            </div>
-          </div>
-        </div>
-
         {/* Search and Filters */}
         <div className="toolbar">
           <div className="search-box">
@@ -187,9 +170,12 @@ const StackDashboard = ({ onLogout, onViewStack }) => {
           </button>
         </div>
 
-        {/* Stacks Grid */}
+        {/* Stacks Table */}
         {loading ? (
-          <div className="loading-state">Loading stacks...</div>
+          <div className="loading-state">
+            <Loader size={32} className="spin" />
+            <p>Loading stacks...</p>
+          </div>
         ) : filteredStacks.length === 0 ? (
           <div className="empty-state">
             <ResourceIcon type="stack" size={48} />
@@ -197,10 +183,111 @@ const StackDashboard = ({ onLogout, onViewStack }) => {
             <p>Create your first stack to get started</p>
           </div>
         ) : (
-          <div className="stacks-grid">
-            {filteredStacks.map(stack => (
-              <StackCard key={stack.id} stack={stack} onRefresh={loadStacks} onViewStack={onViewStack} />
-            ))}
+          <div className="stacks-table-container">
+            <table className="stacks-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Name</th>
+                  <th>Environment</th>
+                  <th>Resources</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStacks.map(stack => (
+                  <tr 
+                    key={stack.id} 
+                    className="stack-row" 
+                    onClick={() => onViewStack && onViewStack(stack.id)}
+                  >
+                    <td className="status-cell">
+                      {getStatusIcon(stack.status)}
+                      <span className="status-text">{stack.status || 'Unknown'}</span>
+                    </td>
+                    <td className="name-cell">
+                      <div className="stack-name">{stack.name}</div>
+                      {stack.description && (
+                        <div className="stack-description">{stack.description}</div>
+                      )}
+                    </td>
+                    <td className="env-cell">
+                      <span className={getEnvBadgeClass(stack.environment)}>
+                        {stack.environment || 'N/A'}
+                      </span>
+                    </td>
+                    <td className="resources-cell">
+                      {stack.resources?.length > 0 ? (
+                        <div className="resources-row">
+                          {stack.resources.slice(0, 3).map((resource, idx) => (
+                            <div key={idx} className="resource-chip">
+                              <ResourceIcon type={resource.resource_type} size={14} />
+                              <span>{resource.resource_name || resource.resource_type?.replace(/_/g, ' ')}</span>
+                            </div>
+                          ))}
+                          {stack.resources.length > 3 && (
+                            <span className="more-resources">+{stack.resources.length - 3}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="no-resources">No resources</span>
+                      )}
+                    </td>
+                    <td className="date-cell">
+                      <div className="stack-meta">
+                        <Clock size={14} />
+                        <span>{formatDate(stack.created_at)}</span>
+                      </div>
+                    </td>
+                    <td className="actions-cell" onClick={(e) => e.stopPropagation()}>
+                      <div className="stack-actions">
+                        <button
+                          className="btn-icon"
+                          onClick={() => onViewStack && onViewStack(stack.id)}
+                          title="View Details"
+                        >
+                          <Eye size={18} />
+                        </button>
+                        <div className="action-dropdown">
+                          <button className="btn-icon" title="More Actions">
+                            <MoreVertical size={18} />
+                          </button>
+                          <div className="dropdown-menu">
+                            <button
+                              onClick={() => handleStackAction(stack.id, 'start')}
+                              disabled={stack.status === 'running' || actionLoading[stack.id]}
+                            >
+                              <Play size={14} /> Start
+                            </button>
+                            <button
+                              onClick={() => handleStackAction(stack.id, 'stop')}
+                              disabled={stack.status === 'stopped' || actionLoading[stack.id]}
+                            >
+                              <Square size={14} /> Stop
+                            </button>
+                            <button
+                              onClick={() => handleStackAction(stack.id, 'restart')}
+                              disabled={actionLoading[stack.id]}
+                            >
+                              <RotateCcw size={14} /> Restart
+                            </button>
+                            <hr />
+                            <button
+                              className="danger"
+                              onClick={() => handleStackAction(stack.id, 'delete')}
+                              disabled={actionLoading[stack.id]}
+                            >
+                              <Trash2 size={14} /> Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -211,95 +298,6 @@ const StackDashboard = ({ onLogout, onViewStack }) => {
         onSuccess={handleCreateSuccess}
       />
     </Layout>
-  );
-};
-
-const StackCard = ({ stack, onRefresh, onViewStack }) => {
-  const [loading, setLoading] = useState(false);
-
-  const handleAction = async (action) => {
-    try {
-      setLoading(true);
-      await stackAPI[action](stack.id);
-      toast.success(`Stack ${action} successful`);
-      onRefresh();
-    } catch (error) {
-      toast.error(`Failed to ${action} stack`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resourceCount = stack.resources?.length || 0;
-  const runningResources = stack.resources?.filter(r => r.status === 'running').length || 0;
-
-  return (
-    <div className={`stack-card ${stack.status}`}>
-      <div className="stack-header">
-        <div className="stack-title">
-          <ResourceIcon type="stack" size={24} />
-          <h3>{stack.name}</h3>
-        </div>
-        <StatusBadge status={stack.status} />
-      </div>
-
-      <p className="stack-description">{stack.description || 'No description'}</p>
-
-      <div className="stack-tags">
-        {stack.tags && Object.keys(stack.tags).map(key => (
-          <span key={key} className="tag">#{stack.tags[key]}</span>
-        ))}
-        {stack.environment && <span className="tag env-tag">{stack.environment}</span>}
-      </div>
-
-      <div className="stack-meta">
-        <span>Created: {new Date(stack.created_at).toLocaleDateString()}</span>
-        <span>Updated: {new Date(stack.updated_at).toLocaleDateString()}</span>
-      </div>
-
-      <div className="stack-resources">
-        <h4>Resources ({resourceCount})</h4>
-        <div className="resource-list">
-          {stack.resources?.slice(0, 5).map((resource, idx) => (
-            <div key={idx} className="resource-item">
-              <ResourceIcon type={resource.resource_type} size={16} />
-              <span>{resource.resource_name || resource.resource_type}</span>
-              <StatusBadge status={resource.status} />
-            </div>
-          ))}
-          {resourceCount > 5 && (
-            <div className="resource-item-more">+{resourceCount - 5} more</div>
-          )}
-        </div>
-      </div>
-
-      <div className="stack-stats">
-        <div className="stat-item">
-          <span className="label">Status:</span>
-          <span className="value">{runningResources}/{resourceCount} Running</span>
-        </div>
-      </div>
-
-      <div className="stack-actions">
-        <button 
-          className="btn btn-secondary" 
-          disabled={loading}
-          onClick={() => onViewStack && onViewStack(stack.id)}
-        >
-          View Details
-        </button>
-        <button className="btn btn-secondary" disabled={loading}>
-          Logs
-        </button>
-        <button 
-          className="btn btn-icon" 
-          onClick={() => handleAction('restart')}
-          disabled={loading}
-        >
-          ⋮
-        </button>
-      </div>
-    </div>
   );
 };
 

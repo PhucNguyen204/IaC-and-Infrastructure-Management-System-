@@ -47,14 +47,14 @@ wait_for_etcd() {
   local etcd_port=$(echo $etcd_host | cut -d: -f2)
   
   if [ -z "$etcd_hostname" ] || [ -z "$etcd_port" ]; then
-    echo "⚠ WARNING: Invalid ETCD_HOST format: ${etcd_host}"
+    echo "âš  WARNING: Invalid ETCD_HOST format: ${etcd_host}"
     echo "Expected format: hostname:port (e.g., etcd-1:2379)"
     return 0
   fi
   
   while [ $attempt -le $max_attempts ]; do
     if check_etcd_health "$etcd_hostname" "$etcd_port"; then
-      echo "✓ etcd is ready and healthy at ${etcd_host}!"
+      echo "âœ“ etcd is ready and healthy at ${etcd_host}!"
       echo "Proceeding with Patroni startup..."
       return 0
     fi
@@ -76,7 +76,7 @@ wait_for_etcd() {
     attempt=$((attempt + 1))
   done
   
-  echo "⚠ WARNING: etcd health check failed after ${max_attempts} attempts"
+  echo "âš  WARNING: etcd health check failed after ${max_attempts} attempts"
   echo "This may indicate etcd cluster is not fully initialized"
   echo "Patroni will attempt to connect anyway and will retry automatically"
   echo "If Patroni fails to start, check etcd cluster status"

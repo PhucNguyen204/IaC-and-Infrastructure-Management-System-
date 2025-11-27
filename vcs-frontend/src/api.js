@@ -2,6 +2,7 @@ import axios from 'axios';
 
 const AUTH_URL = 'http://localhost:8082';
 const PROVISIONING_URL = 'http://localhost:8083/api/v1';
+const MONITORING_URL = 'http://localhost:8084/api/v1';
 
 // Auth API
 export const authAPI = {
@@ -43,8 +44,10 @@ export const clusterAPI = {
   create: (data) => 
     createAuthAxios().post(`${PROVISIONING_URL}/postgres/cluster`, data),
   
-  getAll: () => 
-    createAuthAxios().get(`${PROVISIONING_URL}/postgres/cluster`),
+  // NOTE: Backend không có endpoint GET /postgres/cluster để list all clusters
+  // Để lấy danh sách clusters, sử dụng stackAPI.getAll() và filter resources có type 'POSTGRES_CLUSTER'
+  // getAll: () => 
+  //   createAuthAxios().get(`${PROVISIONING_URL}/postgres/cluster`),
   
   getById: (id) => 
     createAuthAxios().get(`${PROVISIONING_URL}/postgres/cluster/${id}`),
@@ -163,6 +166,13 @@ export const clusterAPI = {
   
   testReplication: (clusterId) => 
     createAuthAxios().post(`${PROVISIONING_URL}/postgres/cluster/${clusterId}/test-replication`),
+
+  // Connection Management
+  testConnection: (clusterId, data = {}) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/postgres/cluster/${clusterId}/test-connection`, data),
+
+  getConnectionInfo: (clusterId) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/postgres/cluster/${clusterId}/connection-info`),
 };
 
 // PostgreSQL Single Instance API
@@ -197,8 +207,10 @@ export const nginxAPI = {
   create: (data) => 
     createAuthAxios().post(`${PROVISIONING_URL}/nginx`, data),
   
-  getAll: () => 
-    createAuthAxios().get(`${PROVISIONING_URL}/nginx`),
+  // NOTE: Backend không có endpoint GET /nginx để list all nginx instances
+  // Để lấy danh sách nginx, sử dụng stackAPI.getAll() và filter resources có type 'NGINX'
+  // getAll: () => 
+  //   createAuthAxios().get(`${PROVISIONING_URL}/nginx`),
   
   getById: (id) => 
     createAuthAxios().get(`${PROVISIONING_URL}/nginx/${id}`),
@@ -274,31 +286,143 @@ export const nginxAPI = {
     createAuthAxios().get(`${PROVISIONING_URL}/nginx/${id}/stats`),
 };
 
-// Docker Service API
-export const dockerAPI = {
-  create: (data) => 
-    createAuthAxios().post(`${PROVISIONING_URL}/docker`, data),
+// Nginx Cluster API
+// NOTE: Backend không có endpoint GET /nginx/cluster để list all clusters
+// Để lấy danh sách clusters, sử dụng stackAPI.getAll() và filter resources có type 'NGINX_CLUSTER'
+// Xem ví dụ trong NginxClusterDashboard.js
+export const nginxClusterAPI = {
+  create: (data) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster`, data),
+
+  getById: (id) =>
+    createAuthAxios().get(`${PROVISIONING_URL}/nginx/cluster/${id}`),
+
+  delete: (id) =>
+    createAuthAxios().delete(`${PROVISIONING_URL}/nginx/cluster/${id}`),
+
+  start: (id) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/start`),
+
+  stop: (id) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/stop`),
+
+  restart: (id) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/restart`),
+
+  addNode: (id, nodeData) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/nodes`, nodeData),
+
+  getNode: (id, nodeId) =>
+    createAuthAxios().get(`${PROVISIONING_URL}/nginx/cluster/${id}/nodes/${nodeId}`),
+
+  removeNode: (id, nodeId) =>
+    createAuthAxios().delete(`${PROVISIONING_URL}/nginx/cluster/${id}/nodes/${nodeId}`),
+
+  updateConfig: (id, config) =>
+    createAuthAxios().put(`${PROVISIONING_URL}/nginx/cluster/${id}/config`, config),
+
+  syncConfig: (id) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/sync-config`),
+
+  listUpstreams: (id) =>
+    createAuthAxios().get(`${PROVISIONING_URL}/nginx/cluster/${id}/upstreams`),
+
+  addUpstream: (id, upstream) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/upstreams`, upstream),
+
+  updateUpstream: (id, upstreamId, upstream) =>
+    createAuthAxios().put(`${PROVISIONING_URL}/nginx/cluster/${id}/upstreams/${upstreamId}`, upstream),
+
+  deleteUpstream: (id, upstreamId) =>
+    createAuthAxios().delete(`${PROVISIONING_URL}/nginx/cluster/${id}/upstreams/${upstreamId}`),
+
+  listServerBlocks: (id) =>
+    createAuthAxios().get(`${PROVISIONING_URL}/nginx/cluster/${id}/server-blocks`),
+
+  addServerBlock: (id, block) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/server-blocks`, block),
+
+  deleteServerBlock: (id, blockId) =>
+    createAuthAxios().delete(`${PROVISIONING_URL}/nginx/cluster/${id}/server-blocks/${blockId}`),
+
+  getHealth: (id) =>
+    createAuthAxios().get(`${PROVISIONING_URL}/nginx/cluster/${id}/health`),
+
+  getMetrics: (id) =>
+    createAuthAxios().get(`${PROVISIONING_URL}/nginx/cluster/${id}/metrics`),
+
+  testConnection: (id) =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/test-connection`),
+
+  getConnectionInfo: (id) =>
+    createAuthAxios().get(`${PROVISIONING_URL}/nginx/cluster/${id}/connection-info`),
+
+  triggerFailover: (id, targetNodeId, reason = '') =>
+    createAuthAxios().post(`${PROVISIONING_URL}/nginx/cluster/${id}/failover`, {
+      target_node_id: targetNodeId,
+      reason,
+    }),
+
+  getFailoverHistory: (id) =>
+    createAuthAxios().get(`${PROVISIONING_URL}/nginx/cluster/${id}/failover-history`),
+};
+
+// Docker-in-Docker (DinD) API - Isolated Docker Sandbox
+export const dinDAPI = {
+  // Environment Management
+  createEnvironment: (data) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/dind/environments`, data),
   
-  getById: (id) => 
-    createAuthAxios().get(`${PROVISIONING_URL}/docker/${id}`),
+  listEnvironments: () => 
+    createAuthAxios().get(`${PROVISIONING_URL}/dind/environments`),
   
-  delete: (id) => 
-    createAuthAxios().delete(`${PROVISIONING_URL}/docker/${id}`),
+  getEnvironment: (id) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/dind/environments/${id}`),
   
-  start: (id) => 
-    createAuthAxios().post(`${PROVISIONING_URL}/docker/${id}/start`),
+  deleteEnvironment: (id) => 
+    createAuthAxios().delete(`${PROVISIONING_URL}/dind/environments/${id}`),
   
-  stop: (id) => 
-    createAuthAxios().post(`${PROVISIONING_URL}/docker/${id}/stop`),
+  startEnvironment: (id) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/dind/environments/${id}/start`),
   
-  restart: (id) => 
-    createAuthAxios().post(`${PROVISIONING_URL}/docker/${id}/restart`),
+  stopEnvironment: (id) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/dind/environments/${id}/stop`),
   
-  updateEnv: (id, environment) => 
-    createAuthAxios().put(`${PROVISIONING_URL}/docker/${id}/env`, { environment }),
+  // Docker Operations inside DinD
+  execCommand: (id, command, timeout = 60) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/dind/environments/${id}/exec`, { command, timeout }),
   
-  getLogs: (id, lines = 100) => 
-    createAuthAxios().get(`${PROVISIONING_URL}/docker/${id}/logs?lines=${lines}`),
+  buildImage: (id, dockerfile, imageName, tag = 'latest', noCache = false) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/dind/environments/${id}/build`, { 
+      dockerfile, 
+      image_name: imageName, 
+      tag,
+      no_cache: noCache 
+    }),
+  
+  runCompose: (id, composeContent, action, serviceName = '', detach = true) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/dind/environments/${id}/compose`, { 
+      compose_content: composeContent, 
+      action, 
+      service_name: serviceName,
+      detach 
+    }),
+  
+  pullImage: (id, image) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/dind/environments/${id}/pull`, { image }),
+  
+  // Info Retrieval
+  listContainers: (id) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/dind/environments/${id}/containers`),
+  
+  listImages: (id) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/dind/environments/${id}/images`),
+  
+  getLogs: (id, tail = 100) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/dind/environments/${id}/logs?tail=${tail}`),
+  
+  getStats: (id) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/dind/environments/${id}/stats`),
 };
 
 // Stack API
@@ -335,4 +459,31 @@ export const stackAPI = {
   
   getMetrics: (id, timeRange = '24h') => 
     createAuthAxios().get(`${PROVISIONING_URL}/stacks/${id}/metrics?range=${timeRange}`),
+};
+
+// Monitoring API (Elasticsearch-based metrics & logs)
+export const monitoringAPI = {
+  // Get current metrics for an instance
+  getCurrentMetrics: (instanceId) => 
+    createAuthAxios().get(`${MONITORING_URL}/monitoring/metrics/${instanceId}`),
+  
+  // Get historical metrics with pagination
+  getHistoricalMetrics: (instanceId, from = 0, size = 100) => 
+    createAuthAxios().get(`${MONITORING_URL}/monitoring/metrics/${instanceId}/history?from=${from}&size=${size}`),
+  
+  // Get aggregated metrics (avg/min/max) for time range
+  getAggregatedMetrics: (instanceId, timeRange = '1h') => 
+    createAuthAxios().get(`${MONITORING_URL}/monitoring/metrics/${instanceId}/aggregate?range=${timeRange}`),
+  
+  // Get logs for an instance
+  getLogs: (instanceId, from = 0, size = 100) => 
+    createAuthAxios().get(`${MONITORING_URL}/monitoring/logs/${instanceId}?from=${from}&size=${size}`),
+  
+  // Get health status from Redis
+  getHealthStatus: (instanceId) => 
+    createAuthAxios().get(`${MONITORING_URL}/monitoring/health/${instanceId}`),
+  
+  // List all monitored infrastructure
+  listInfrastructure: () => 
+    createAuthAxios().get(`${MONITORING_URL}/monitoring/infrastructure`),
 };

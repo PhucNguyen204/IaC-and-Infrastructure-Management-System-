@@ -12,6 +12,10 @@ import ResourceIcon from './common/ResourceIcon';
 import StackOverviewTab from './stack-detail/StackOverviewTab';
 import StackLogsTab from './stack-detail/StackLogsTab';
 import StackConfigTab from './stack-detail/StackConfigTab';
+import StackMetricsTab from './stack-detail/StackMetricsTab';
+import ConnectionPanel from './cluster/ConnectionPanel';
+import SQLConsole from './cluster/SQLConsole';
+import NginxClusterPanel from './nginx/NginxClusterPanel';
 import toast from 'react-hot-toast';
 import './StackDetailPage.css';
 
@@ -52,6 +56,41 @@ const StackDetailPage = ({ stackId, onBack, onLogout }) => {
       toast.error(`Failed to ${action} stack`);
     }
     setShowActions(false);
+  };
+
+  // Helper functions for PostgreSQL cluster
+  const hasPostgresCluster = () => {
+    return stack?.resources?.some(r => 
+      r.resource_type === 'POSTGRES_CLUSTER' || 
+      r.resource_type === 'postgres_cluster'
+    );
+  };
+
+  const getClusterResource = () => {
+    return stack?.resources?.find(r => 
+      r.resource_type === 'POSTGRES_CLUSTER' || 
+      r.resource_type === 'postgres_cluster'
+    );
+  };
+
+  const getClusterId = () => {
+    const resource = getClusterResource();
+    return resource?.outputs?.cluster_id || null;
+  };
+
+  const hasNginxCluster = () => {
+    return stack?.resources?.some(r => 
+      r.resource_type?.toUpperCase() === 'NGINX_CLUSTER'
+    );
+  };
+
+  const getNginxClusterResource = () => {
+    return stack?.resources?.find(r => r.resource_type?.toUpperCase() === 'NGINX_CLUSTER');
+  };
+
+  const getNginxClusterId = () => {
+    const resource = getNginxClusterResource();
+    return resource?.outputs?.cluster_id || resource?.infrastructure_id || null;
   };
 
   if (loading) {
@@ -145,6 +184,36 @@ const StackDetailPage = ({ stackId, onBack, onLogout }) => {
           >
             Overview
           </button>
+          {hasPostgresCluster() && (
+            <>
+              <button 
+                className={`tab ${activeTab === 'connect' ? 'active' : ''}`}
+                onClick={() => setActiveTab('connect')}
+              >
+                Connect
+              </button>
+              <button 
+                className={`tab ${activeTab === 'sql' ? 'active' : ''}`}
+                onClick={() => setActiveTab('sql')}
+              >
+                SQL Console
+              </button>
+            </>
+          )}
+          {hasNginxCluster() && (
+            <button 
+              className={`tab ${activeTab === 'nginx' ? 'active' : ''}`}
+              onClick={() => setActiveTab('nginx')}
+            >
+              Nginx Cluster
+            </button>
+          )}
+          <button 
+            className={`tab ${activeTab === 'monitoring' ? 'active' : ''}`}
+            onClick={() => setActiveTab('monitoring')}
+          >
+            Monitoring
+          </button>
           <button 
             className={`tab ${activeTab === 'logs' ? 'active' : ''}`}
             onClick={() => setActiveTab('logs')}
@@ -162,6 +231,22 @@ const StackDetailPage = ({ stackId, onBack, onLogout }) => {
         {/* Tab Content */}
         <div className="tab-content">
           {activeTab === 'overview' && <StackOverviewTab stack={stack} onRefresh={loadStack} />}
+          {activeTab === 'connect' && getClusterId() && (
+            <ConnectionPanel clusterId={getClusterId()} clusterInfo={getClusterResource()} />
+          )}
+          {activeTab === 'sql' && getClusterId() && (
+            <SQLConsole clusterId={getClusterId()} />
+          )}
+          {activeTab === 'nginx' && getNginxClusterId() && (
+            <NginxClusterPanel 
+              clusterId={getNginxClusterId()} 
+              resource={getNginxClusterResource()}
+              onRefresh={loadStack}
+            />
+          )}
+          {activeTab === 'monitoring' && (
+            <StackMetricsTab stackId={stackId} resources={stack.resources || []} />
+          )}
           {activeTab === 'logs' && <StackLogsTab stackId={stackId} />}
           {activeTab === 'config' && <StackConfigTab stack={stack} onRefresh={loadStack} />}
         </div>

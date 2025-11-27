@@ -23,6 +23,7 @@ import (
 
 type IDockerService interface {
 	CreateContainer(ctx context.Context, config ContainerConfig) (string, error)
+	CreateDinDContainer(ctx context.Context, config ContainerConfig) (string, error) // For Docker-in-Docker with privileged mode
 	StartContainer(ctx context.Context, containerID string) error
 	StopContainer(ctx context.Context, containerID string) error
 	RestartContainer(ctx context.Context, containerID string) error
@@ -48,6 +49,7 @@ type ContainerConfig struct {
 	NetworkAlias string
 	Cmd          []string
 	Resources    ResourceConfig
+	Privileged   bool // For Docker-in-Docker containers
 }
 
 type ResourceConfig struct {
@@ -140,6 +142,86 @@ func (ds *dockerService) CreateContainer(ctx context.Context, config ContainerCo
 	}
 
 	ds.logger.Info("container created", zap.String("container_id", resp.ID), zap.String("name", config.Name))
+	return resp.ID, nil
+}
+
+// CreateDinDContainer creates a Docker-in-Docker container with privileged mode
+func (ds *dockerService) CreateDinDContainer(ctx context.Context, config ContainerConfig) (string, error) {
+	// Check if image exists locally first
+	_, _, err := ds.client.ImageInspectWithRaw(ctx, config.Image)
+	if err != nil {
+		// Image not found locally, try to pull
+		ds.logger.Info("pulling DinD image", zap.String("image", config.Image))
+		reader, pullErr := ds.client.ImagePull(ctx, config.Image, types.ImagePullOptions{})
+		if pullErr != nil {
+			ds.logger.Error("failed to pull DinD image", zap.Error(pullErr))
+			return "", pullErr
+		}
+		defer reader.Close()
+		io.Copy(io.Discard, reader)
+	} else {
+		ds.logger.Info("using local DinD image", zap.String("image", config.Image))
+	}
+
+	portBindings := nat.PortMap{}
+	exposedPorts := nat.PortSet{}
+	for containerPort, hostPort := range config.Ports {
+		port, err := nat.NewPort("tcp", containerPort)
+		if err != nil {
+			return "", err
+		}
+		portBindings[port] = []nat.PortBinding{{HostPort: hostPort}}
+		exposedPorts[port] = struct{}{}
+	}
+
+	binds := []string{}
+	for hostPath, containerPath := range config.Volumes {
+		binds = append(binds, fmt.Sprintf("%s:%s", hostPath, containerPath))
+	}
+
+	containerConfig := &container.Config{
+		Image:        config.Image,
+		Env:          config.Env,
+		ExposedPorts: exposedPorts,
+		Cmd:          config.Cmd,
+	}
+
+	// DinD requires privileged mode and specific security options
+	hostConfig := &container.HostConfig{
+		PortBindings: portBindings,
+		Binds:        binds,
+		Resources: container.Resources{
+			NanoCPUs: config.Resources.CPULimit,
+			Memory:   config.Resources.MemoryLimit,
+		},
+		RestartPolicy: container.RestartPolicy{
+			Name: "unless-stopped",
+		},
+		Privileged: true, // Required for Docker-in-Docker
+		SecurityOpt: []string{
+			"seccomp=unconfined", // Required for DinD
+		},
+	}
+
+	networkConfig := &network.NetworkingConfig{}
+	if config.Network != "" {
+		networkConfig.EndpointsConfig = map[string]*network.EndpointSettings{
+			config.Network: {
+				Aliases: []string{config.NetworkAlias},
+			},
+		}
+	}
+
+	resp, err := ds.client.ContainerCreate(ctx, containerConfig, hostConfig, networkConfig, nil, config.Name)
+	if err != nil {
+		ds.logger.Error("failed to create DinD container", zap.Error(err))
+		return "", err
+	}
+
+	ds.logger.Info("DinD container created",
+		zap.String("container_id", resp.ID),
+		zap.String("name", config.Name),
+		zap.Bool("privileged", true))
 	return resp.ID, nil
 }
 

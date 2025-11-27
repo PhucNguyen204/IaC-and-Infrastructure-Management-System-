@@ -202,27 +202,7 @@ function Dashboard({ onLogout }) {
         </div>
       </div>
 
-      {/* Stats Summary */}
-      <div className="stats-summary">
-        <div className="stat-card">
-          <div className="stat-value">{stacks.length}</div>
-          <div className="stat-label">Total Stacks</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value running">{stacks.filter(s => s.status === 'running').length}</div>
-          <div className="stat-label">Running</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value stopped">{stacks.filter(s => s.status === 'stopped').length}</div>
-          <div className="stat-label">Stopped</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">{stacks.reduce((acc, s) => acc + (s.resources?.length || 0), 0)}</div>
-          <div className="stat-label">Total Resources</div>
-        </div>
-      </div>
-
-      {/* Stack List */}
+      {/* Stack Table */}
       <div className="stacks-container">
         {loading ? (
           <div className="loading-state">
@@ -246,96 +226,107 @@ function Dashboard({ onLogout }) {
             )}
           </div>
         ) : (
-          <div className="stacks-list">
-            {filteredStacks.map(stack => (
-              <div key={stack.id} className="stack-card">
-                <div className="stack-card-header">
-                  <div className="stack-info">
-                    <div className="stack-title-row">
+          <div className="stacks-table-container">
+            <table className="stacks-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Name</th>
+                  <th>Environment</th>
+                  <th>Resources</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStacks.map(stack => (
+                  <tr key={stack.id} className="stack-row" onClick={() => setSelectedStack(stack.id)}>
+                    <td className="status-cell">
                       {getStatusIcon(stack.status)}
-                      <h3 className="stack-name">{stack.name}</h3>
+                      <span className="status-text">{stack.status || 'Unknown'}</span>
+                    </td>
+                    <td className="name-cell">
+                      <div className="stack-name">{stack.name}</div>
+                      {stack.description && (
+                        <div className="stack-description">{stack.description}</div>
+                      )}
+                    </td>
+                    <td className="env-cell">
                       <span className={getEnvBadgeClass(stack.environment)}>
-                        {stack.environment}
+                        {stack.environment || 'N/A'}
                       </span>
-                    </div>
-                    {stack.description && (
-                      <p className="stack-description">{stack.description}</p>
-                    )}
-                  </div>
-                  <div className="stack-actions">
-                    <button
-                      className="btn-icon"
-                      onClick={() => setSelectedStack(stack.id)}
-                      title="View Details"
-                    >
-                      <Eye size={18} />
-                    </button>
-                    <div className="action-dropdown">
-                      <button className="btn-icon" title="More Actions">
-                        <MoreVertical size={18} />
-                      </button>
-                      <div className="dropdown-menu">
-                        <button
-                          onClick={() => handleStackAction(stack.id, 'start')}
-                          disabled={stack.status === 'running' || actionLoading[stack.id]}
-                        >
-                          <Play size={14} /> Start
-                        </button>
-                        <button
-                          onClick={() => handleStackAction(stack.id, 'stop')}
-                          disabled={stack.status === 'stopped' || actionLoading[stack.id]}
-                        >
-                          <Square size={14} /> Stop
-                        </button>
-                        <button
-                          onClick={() => handleStackAction(stack.id, 'restart')}
-                          disabled={actionLoading[stack.id]}
-                        >
-                          <RotateCcw size={14} /> Restart
-                        </button>
-                        <hr />
-                        <button
-                          className="danger"
-                          onClick={() => handleStackAction(stack.id, 'delete')}
-                          disabled={actionLoading[stack.id]}
-                        >
-                          <Trash2 size={14} /> Delete
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="stack-card-body">
-                  <div className="resources-row">
-                    {stack.resources?.length > 0 ? (
-                      stack.resources.map((resource, idx) => (
-                        <div key={idx} className="resource-chip">
-                          {getResourceIcon(resource.resource_type)}
-                          <span>{resource.resource_name || resource.resource_type?.replace(/_/g, ' ')}</span>
+                    </td>
+                    <td className="resources-cell">
+                      {stack.resources?.length > 0 ? (
+                        <div className="resources-row">
+                          {stack.resources.slice(0, 3).map((resource, idx) => (
+                            <div key={idx} className="resource-chip">
+                              {getResourceIcon(resource.resource_type)}
+                              <span>{resource.resource_name || resource.resource_type?.replace(/_/g, ' ')}</span>
+                            </div>
+                          ))}
+                          {stack.resources.length > 3 && (
+                            <span className="more-resources">+{stack.resources.length - 3}</span>
+                          )}
                         </div>
-                      ))
-                    ) : (
-                      <span className="no-resources">No resources</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="stack-card-footer">
-                  <div className="stack-meta">
-                    <Clock size={14} />
-                    <span>Created {formatDate(stack.created_at)}</span>
-                  </div>
-                  <button 
-                    className="view-details-btn"
-                    onClick={() => setSelectedStack(stack.id)}
-                  >
-                    View Details
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
+                      ) : (
+                        <span className="no-resources">No resources</span>
+                      )}
+                    </td>
+                    <td className="date-cell">
+                      <div className="stack-meta">
+                        <Clock size={14} />
+                        <span>{formatDate(stack.created_at)}</span>
+                      </div>
+                    </td>
+                    <td className="actions-cell" onClick={(e) => e.stopPropagation()}>
+                      <div className="stack-actions">
+                        <button
+                          className="btn-icon"
+                          onClick={() => setSelectedStack(stack.id)}
+                          title="View Details"
+                        >
+                          <Eye size={18} />
+                        </button>
+                        <div className="action-dropdown">
+                          <button className="btn-icon" title="More Actions">
+                            <MoreVertical size={18} />
+                          </button>
+                          <div className="dropdown-menu">
+                            <button
+                              onClick={() => handleStackAction(stack.id, 'start')}
+                              disabled={stack.status === 'running' || actionLoading[stack.id]}
+                            >
+                              <Play size={14} /> Start
+                            </button>
+                            <button
+                              onClick={() => handleStackAction(stack.id, 'stop')}
+                              disabled={stack.status === 'stopped' || actionLoading[stack.id]}
+                            >
+                              <Square size={14} /> Stop
+                            </button>
+                            <button
+                              onClick={() => handleStackAction(stack.id, 'restart')}
+                              disabled={actionLoading[stack.id]}
+                            >
+                              <RotateCcw size={14} /> Restart
+                            </button>
+                            <hr />
+                            <button
+                              className="danger"
+                              onClick={() => handleStackAction(stack.id, 'delete')}
+                              disabled={actionLoading[stack.id]}
+                            >
+                              <Trash2 size={14} /> Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

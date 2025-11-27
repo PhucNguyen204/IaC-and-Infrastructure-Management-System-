@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Globe, Container, Layers, Server, Box } from 'lucide-react';
+import { Database, Globe, Layers, Server, Box } from 'lucide-react';
 
 const ResourceIcon = ({ type, size = 20 }) => {
   const getIcon = () => {
@@ -11,13 +11,14 @@ const ResourceIcon = ({ type, size = 20 }) => {
       case 'database':
         return <Database size={size} />;
       case 'nginx_gateway':
+      case 'nginx_cluster':
       case 'nginx':
       case 'gateway':
         return <Globe size={size} />;
-      case 'docker_service':
-      case 'docker':
-      case 'container':
-        return <Container size={size} />;
+      case 'dind_environment':
+      case 'docker_sandbox':
+      case 'sandbox':
+        return <Box size={size} />;
       case 'stack':
         return <Layers size={size} />;
       case 'server':

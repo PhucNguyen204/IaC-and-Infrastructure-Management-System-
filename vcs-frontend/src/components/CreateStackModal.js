@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Trash2, Database, Globe, Container, Server, Shield, Network } from 'lucide-react';
+import { X, Plus, Trash2, Database, Globe, Box, Server, Shield, Network, Cpu, HardDrive, Clock } from 'lucide-react';
 import { stackAPI } from '../api';
 import toast from 'react-hot-toast';
 import './CreateStackModal.css';
@@ -72,12 +72,28 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
     }
 }`
         };
-      case 'DOCKER_SERVICE':
+      case 'DIND_ENVIRONMENT':
         return {
-          image: '',
-          image_tag: 'latest',
-          ports: [{ container_port: 80, host_port: 0, protocol: 'tcp' }],
-          env_vars: []
+          resource_plan: 'medium',
+          description: '',
+          auto_cleanup: false,
+          ttl_hours: 24
+        };
+      case 'NGINX_CLUSTER':
+        return {
+          node_count: 2,
+          http_port: 8080,
+          https_port: 8443,
+          load_balance_mode: 'round_robin',
+          virtual_ip: '192.168.0.100',
+          worker_connections: 2048,
+          worker_processes: 2,
+          ssl_enabled: false,
+          gzip_enabled: true,
+          health_check_enabled: true,
+          health_check_path: '/health',
+          rate_limit_enabled: false,
+          cache_enabled: false
         };
       default:
         return {};
@@ -148,13 +164,20 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
       }
     }
 
-    if (newResource.type === 'DOCKER_SERVICE') {
-      if (!newResource.spec.image) {
-        toast.error('Docker image is required');
+    if (newResource.type === 'DIND_ENVIRONMENT') {
+      if (!newResource.spec.resource_plan) {
+        toast.error('Resource plan is required');
         return false;
       }
-      if (!newResource.spec.image_tag) {
-        toast.error('Docker image tag is required');
+    }
+
+    if (newResource.type === 'NGINX_CLUSTER') {
+      if (!newResource.spec.http_port) {
+        toast.error('HTTP port is required');
+        return false;
+      }
+      if ((newResource.spec.node_count || 0) < 2) {
+        toast.error('Nginx cluster requires at least 2 nodes');
         return false;
       }
     }
@@ -254,9 +277,10 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
       case 'POSTGRES_CLUSTER':
         return <Database size={18} />;
       case 'NGINX_GATEWAY':
+      case 'NGINX_CLUSTER':
         return <Globe size={18} />;
-      case 'DOCKER_SERVICE':
-        return <Container size={18} />;
+      case 'DIND_ENVIRONMENT':
+        return <Box size={18} />;
       default:
         return <Server size={18} />;
     }
@@ -267,9 +291,10 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
       case 'POSTGRES_CLUSTER':
         return '#336791';
       case 'NGINX_GATEWAY':
+      case 'NGINX_CLUSTER':
         return '#009639';
-      case 'DOCKER_SERVICE':
-        return '#2496ED';
+      case 'DIND_ENVIRONMENT':
+        return '#6366f1';
       default:
         return '#6b7280';
     }
@@ -375,137 +400,207 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
     );
   };
 
-  const renderDockerConfig = () => {
+  const renderNginxClusterConfig = () => {
     const { spec } = newResource;
     return (
       <div className="config-container">
         <div className="config-section">
           <div className="config-section-header">
             <div className="config-section-title">
-              <Container size={16} />
-              <span>Docker Configuration</span>
+              <Globe size={16} />
+              <span>Nginx Cluster Configuration</span>
             </div>
           </div>
           <div className="config-section-content">
             <div className="config-grid">
               <div className="form-group">
-                <label>Image Name *</label>
+                <label>Node Count *</label>
                 <input
-                  type="text"
-                  value={spec.image || ''}
-                  onChange={(e) => handleConfigChange('image', e.target.value)}
-                  placeholder="e.g., nginx, redis, mongo"
+                  type="number"
+                  min="2"
+                  max="10"
+                  value={spec.node_count || 2}
+                  onChange={(e) => handleConfigChange('node_count', parseInt(e.target.value, 10))}
                 />
               </div>
               <div className="form-group">
-                <label>Image Tag *</label>
+                <label>HTTP Port *</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="65535"
+                  value={spec.http_port || 8080}
+                  onChange={(e) => handleConfigChange('http_port', parseInt(e.target.value, 10))}
+                />
+              </div>
+              <div className="form-group">
+                <label>HTTPS Port</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="65535"
+                  value={spec.https_port || ''}
+                  onChange={(e) => handleConfigChange('https_port', parseInt(e.target.value || 0, 10))}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="form-group">
+                <label>Load Balancing Mode</label>
+                <select
+                  value={spec.load_balance_mode || 'round_robin'}
+                  onChange={(e) => handleConfigChange('load_balance_mode', e.target.value)}
+                >
+                  <option value="round_robin">Round Robin</option>
+                  <option value="least_conn">Least Connections</option>
+                  <option value="ip_hash">IP Hash</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Virtual IP</label>
                 <input
                   type="text"
-                  value={spec.image_tag || ''}
-                  onChange={(e) => handleConfigChange('image_tag', e.target.value)}
-                  placeholder="e.g., latest, alpine"
+                  value={spec.virtual_ip || ''}
+                  onChange={(e) => handleConfigChange('virtual_ip', e.target.value)}
+                  placeholder="e.g., 192.168.0.100"
+                />
+              </div>
+              <div className="form-group">
+                <label>Worker Connections</label>
+                <input
+                  type="number"
+                  min="256"
+                  max="100000"
+                  value={spec.worker_connections || 2048}
+                  onChange={(e) => handleConfigChange('worker_connections', parseInt(e.target.value, 10))}
                 />
               </div>
             </div>
-            
-            {/* Port Mappings */}
+            <div className="config-grid">
+              <div className="form-group checkbox">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={spec.ssl_enabled || false}
+                    onChange={(e) => handleConfigChange('ssl_enabled', e.target.checked)}
+                  />
+                  Enable SSL (provide certs later)
+                </label>
+              </div>
+              <div className="form-group checkbox">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={spec.gzip_enabled || false}
+                    onChange={(e) => handleConfigChange('gzip_enabled', e.target.checked)}
+                  />
+                  Enable Gzip compression
+                </label>
+              </div>
+              <div className="form-group checkbox">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={spec.rate_limit_enabled || false}
+                    onChange={(e) => handleConfigChange('rate_limit_enabled', e.target.checked)}
+                  />
+                  Enable Rate Limiting
+                </label>
+              </div>
+              <div className="form-group checkbox">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={spec.cache_enabled || false}
+                    onChange={(e) => handleConfigChange('cache_enabled', e.target.checked)}
+                  />
+                  Enable Disk Cache
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDinDConfig = () => {
+    const { spec } = newResource;
+    
+    const planDetails = {
+      small: { cpu: '1 CPU', memory: '1 GB RAM', desc: 'For light development & testing' },
+      medium: { cpu: '2 CPU', memory: '2 GB RAM', desc: 'Balanced for most workloads' },
+      large: { cpu: '4 CPU', memory: '4 GB RAM', desc: 'For heavy builds & multiple containers' }
+    };
+
+    return (
+      <div className="config-container">
+        <div className="config-section">
+          <div className="config-section-header">
+            <div className="config-section-title">
+              <Box size={16} />
+              <span>Docker Sandbox Configuration</span>
+            </div>
+          </div>
+          <div className="config-section-content">
+            {/* Resource Plan Selection */}
             <div className="form-group full-width">
-              <label>Port Mappings</label>
-              {(spec.ports || []).map((port, index) => (
-                <div key={index} className="array-item">
-                  <div className="config-grid-3">
-                    <div className="form-group">
-                      <label>Container Port</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="65535"
-                        value={port.container_port || ''}
-                        onChange={(e) => handleArrayConfigChange('ports', index, 'container_port', parseInt(e.target.value))}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Host Port</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="65535"
-                        value={port.host_port || ''}
-                        onChange={(e) => handleArrayConfigChange('ports', index, 'host_port', parseInt(e.target.value))}
-                        placeholder="Auto"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Protocol</label>
-                      <select
-                        value={port.protocol || 'tcp'}
-                        onChange={(e) => handleArrayConfigChange('ports', index, 'protocol', e.target.value)}
-                      >
-                        <option value="tcp">TCP</option>
-                        <option value="udp">UDP</option>
-                      </select>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-icon btn-danger"
-                    onClick={() => removeArrayItem('ports', index)}
+              <label><Cpu size={14} /> Resource Plan *</label>
+              <div className="plan-grid">
+                {['small', 'medium', 'large'].map(plan => (
+                  <div 
+                    key={plan}
+                    className={`plan-card ${spec.resource_plan === plan ? 'selected' : ''}`}
+                    onClick={() => handleConfigChange('resource_plan', plan)}
                   >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="btn btn-sm btn-secondary"
-                onClick={() => addArrayItem('ports', { container_port: 80, host_port: 0, protocol: 'tcp' })}
-              >
-                <Plus size={14} /> Add Port
-              </button>
+                    <div className="plan-header">
+                      <span className="plan-name">{plan.charAt(0).toUpperCase() + plan.slice(1)}</span>
+                      {spec.resource_plan === plan && <span className="plan-check">✓</span>}
+                    </div>
+                    <div className="plan-specs">
+                      <span><Cpu size={12} /> {planDetails[plan].cpu}</span>
+                      <span><HardDrive size={12} /> {planDetails[plan].memory}</span>
+                    </div>
+                    <div className="plan-desc">{planDetails[plan].desc}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            {/* Environment Variables */}
             <div className="form-group full-width">
-              <label>Environment Variables</label>
-              {(spec.env_vars || []).map((env, index) => (
-                <div key={index} className="array-item">
-                  <div className="config-grid-2">
-                    <div className="form-group">
-                      <label>Key</label>
-                      <input
-                        type="text"
-                        value={env.key || ''}
-                        onChange={(e) => handleArrayConfigChange('env_vars', index, 'key', e.target.value)}
-                        placeholder="VARIABLE_NAME"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Value</label>
-                      <input
-                        type="text"
-                        value={env.value || ''}
-                        onChange={(e) => handleArrayConfigChange('env_vars', index, 'value', e.target.value)}
-                        placeholder="value"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-icon btn-danger"
-                    onClick={() => removeArrayItem('env_vars', index)}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="btn btn-sm btn-secondary"
-                onClick={() => addArrayItem('env_vars', { key: '', value: '' })}
-              >
-                <Plus size={14} /> Add Variable
-              </button>
+              <label>Description</label>
+              <textarea
+                value={spec.description || ''}
+                onChange={(e) => handleConfigChange('description', e.target.value)}
+                placeholder="What will you use this Docker Sandbox for?"
+                rows="2"
+              />
             </div>
+
+            <div className="config-grid">
+              <div className="form-group checkbox">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={spec.auto_cleanup || false}
+                    onChange={(e) => handleConfigChange('auto_cleanup', e.target.checked)}
+                  />
+                  <Clock size={14} /> Auto cleanup after TTL
+                </label>
+              </div>
+              {spec.auto_cleanup && (
+                <div className="form-group">
+                  <label>TTL (hours)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="720"
+                    value={spec.ttl_hours || 24}
+                    onChange={(e) => handleConfigChange('ttl_hours', parseInt(e.target.value))}
+                  />
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
       </div>
@@ -518,8 +613,10 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
         return renderPostgresConfig();
       case 'NGINX_GATEWAY':
         return renderNginxConfig();
-      case 'DOCKER_SERVICE':
-        return renderDockerConfig();
+      case 'NGINX_CLUSTER':
+        return renderNginxClusterConfig();
+      case 'DIND_ENVIRONMENT':
+        return renderDinDConfig();
       default:
         return null;
     }
@@ -531,8 +628,10 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
         return `${resource.spec.node_count || 3} nodes • v${resource.spec.postgres_version || '17'} • ${resource.spec.replication_mode || 'async'}`;
       case 'NGINX_GATEWAY':
         return `Port ${resource.spec.port || 8080}${resource.spec.ssl_port ? ` / SSL ${resource.spec.ssl_port}` : ''}`;
-      case 'DOCKER_SERVICE':
-        return `${resource.spec.image || 'unknown'}:${resource.spec.image_tag || 'latest'}`;
+      case 'NGINX_CLUSTER':
+        return `${resource.spec.node_count || 2} nodes • HTTP ${resource.spec.http_port || 8080}${resource.spec.https_port ? ` / HTTPS ${resource.spec.https_port}` : ''}`;
+      case 'DIND_ENVIRONMENT':
+        return `${(resource.spec.resource_plan || 'medium').toUpperCase()} plan${resource.spec.auto_cleanup ? ` • TTL ${resource.spec.ttl_hours}h` : ''}`;
       default:
         return '';
     }
@@ -633,7 +732,8 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
                   >
                     <option value="POSTGRES_CLUSTER">PostgreSQL Cluster</option>
                     <option value="NGINX_GATEWAY">Nginx Gateway</option>
-                    <option value="DOCKER_SERVICE">Docker Service</option>
+                    <option value="NGINX_CLUSTER">Nginx HA Cluster</option>
+                    <option value="DIND_ENVIRONMENT">Docker Sandbox (DinD)</option>
                   </select>
                 </div>
                 <div className="form-group">
@@ -658,6 +758,7 @@ const CreateStackModal = ({ isOpen, onClose, onSuccess }) => {
                     <option value="app">Application</option>
                     <option value="cache">Cache</option>
                     <option value="queue">Message Queue</option>
+                    <option value="sandbox">Docker Sandbox</option>
                   </select>
                 </div>
               </div>

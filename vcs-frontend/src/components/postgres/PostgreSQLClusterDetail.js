@@ -30,18 +30,28 @@ const PostgreSQLClusterDetail = ({ clusterId, onBack }) => {
 
   useEffect(() => {
     loadCluster();
+    
+    // Auto-refresh every 5 seconds to update real-time status from Docker
+    const interval = setInterval(() => {
+      loadCluster(true);
+    }, 5000);
+    
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clusterId]);
 
-  const loadCluster = async () => {
+  const loadCluster = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const response = await clusterAPI.getById(clusterId);
       setCluster(response.data.data);
     } catch (error) {
       console.error('Failed to load cluster:', error);
-      toast.error('Failed to load cluster details');
+      if (!silent) {
+        toast.error('Failed to load cluster details');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 

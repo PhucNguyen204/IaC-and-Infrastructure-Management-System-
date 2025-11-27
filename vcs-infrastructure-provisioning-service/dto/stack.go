@@ -81,14 +81,15 @@ type StackListResponse struct {
 }
 
 type StackSummary struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Environment   string    `json:"environment"`
-	Status        string    `json:"status"`
-	ResourceCount int       `json:"resource_count"`
-	Tags          []string  `json:"tags"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	Environment   string              `json:"environment"`
+	Status        string              `json:"status"`
+	ResourceCount int                 `json:"resource_count"`
+	Resources     []StackResourceInfo `json:"resources,omitempty"`
+	Tags          []string            `json:"tags"`
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
 }
 
 // StackOperationRequest for start/stop/restart stack

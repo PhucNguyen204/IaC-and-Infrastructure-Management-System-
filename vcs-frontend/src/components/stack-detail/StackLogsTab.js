@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Download, RefreshCw, Database, Globe, Container } from 'lucide-react';
-import { stackAPI, clusterAPI, nginxAPI, dockerAPI } from '../../api';
+import { stackAPI, clusterAPI, nginxAPI, dinDAPI } from '../../api';
 import './StackLogsTab.css';
 
 const StackLogsTab = ({ stackId }) => {
@@ -54,9 +54,8 @@ const StackLogsTab = ({ stackId }) => {
           response = await nginxAPI.getLogs(resource.infrastructure_id, 100);
           logData = response.data?.data || response.data;
           break;
-        case 'DOCKER_SERVICE':
-          response = await dockerAPI.getLogs(resource.infrastructure_id, 100);
-          // Backend returns: { data: { logs: ["line1", "line2"] } }
+        case 'DIND_ENVIRONMENT':
+          response = await dinDAPI.getLogs(resource.infrastructure_id, 100);
           logData = response.data?.data?.logs || response.data?.logs || [];
           break;
         default:
@@ -93,8 +92,10 @@ const StackLogsTab = ({ stackId }) => {
   const getResourceIcon = (type) => {
     switch (type?.toUpperCase()) {
       case 'POSTGRES_CLUSTER': return <Database size={16} />;
-      case 'NGINX_GATEWAY': return <Globe size={16} />;
-      case 'DOCKER_SERVICE': return <Container size={16} />;
+      case 'NGINX_GATEWAY':
+      case 'NGINX_CLUSTER':
+        return <Globe size={16} />;
+      case 'DIND_ENVIRONMENT': return <Container size={16} />;
       default: return null;
     }
   };

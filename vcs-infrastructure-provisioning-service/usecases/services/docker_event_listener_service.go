@@ -66,7 +66,6 @@ func (s *dockerEventListenerService) Start(ctx context.Context) error {
 
 	s.logger.Info("docker event listener started")
 
-	// Process events in a goroutine
 	go s.processEvents(ctx)
 
 	return nil
@@ -102,7 +101,6 @@ func (s *dockerEventListenerService) handleEvent(ctx context.Context, event even
 		zap.String("container_id", containerID),
 		zap.String("container_name", containerName))
 
-	// Map Docker actions to infrastructure status
 	var status entities.InfrastructureStatus
 	switch event.Action {
 	case events.ActionStart:
@@ -120,7 +118,6 @@ func (s *dockerEventListenerService) handleEvent(ctx context.Context, event even
 		return
 	}
 
-	// Find infrastructure by container ID
 	infra, err := s.infraRepo.FindByContainerID(ctx, containerID)
 	if err != nil {
 		// Container might not be managed by our system, skip

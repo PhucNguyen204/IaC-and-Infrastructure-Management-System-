@@ -66,6 +66,20 @@ func main() {
 		&entities.StackResource{},
 		&entities.StackTemplate{},
 		&entities.StackOperation{},
+		// Nginx Cluster entities
+		&entities.NginxCluster{},
+		&entities.NginxNode{},
+		&entities.NginxClusterUpstream{},
+		&entities.NginxUpstreamServer{},
+		&entities.NginxServerBlock{},
+		&entities.NginxLocation{},
+		&entities.NginxFailoverEvent{},
+		// K8s Cluster entities
+		&entities.K8sCluster{},
+		&entities.K8sNode{},
+		// DinD (Docker-in-Docker) entities
+		&entities.DinDEnvironment{},
+		&entities.DinDCommandHistory{},
 	); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
@@ -85,17 +99,35 @@ func main() {
 	pgRepo := repositories.NewPostgreSQLRepository(postgresDb)
 	nginxRepo := repositories.NewNginxRepository(postgresDb)
 	clusterRepo := repositories.NewPostgreSQLClusterRepository(postgresDb)
+	nginxClusterRepo := repositories.NewNginxClusterRepository(postgresDb)
+	k8sClusterRepo := repositories.NewK8sClusterRepository(postgresDb)
 	pgDatabaseRepo := repositories.NewPostgresDatabaseRepository(postgresDb)
 	dockerRepo := repositories.NewDockerServiceRepository(postgresDb)
 	stackRepo := repositories.NewStackRepository(postgresDb)
+	dinDRepo := repositories.NewDinDRepository(postgresDb)
 
 	cacheService := services.NewCacheService(redisClient)
 	pgService := services.NewPostgreSQLService(infraRepo, pgRepo, dockerService, kafkaProducer, logger)
 	nginxService := services.NewNginxService(infraRepo, nginxRepo, dockerService, kafkaProducer, logger)
 	clusterService := services.NewPostgreSQLClusterService(infraRepo, clusterRepo, dockerService, kafkaProducer, cacheService, logger)
+	nginxClusterService := services.NewNginxClusterService(infraRepo, nginxClusterRepo, dockerService, kafkaProducer, logger)
+	k8sClusterService := services.NewK8sClusterService(k8sClusterRepo, infraRepo, dockerService, kafkaProducer, logger)
 	pgDatabaseService := services.NewPostgresDatabaseService(pgDatabaseRepo, pgRepo, dockerService)
 	dockerSvcService := services.NewDockerServiceService(dockerRepo, infraRepo, dockerService)
-	stackService := services.NewStackService(stackRepo, infraRepo, nginxService, pgService, clusterService, clusterRepo, pgDatabaseService, dockerSvcService)
+	dinDService := services.NewDinDService(dinDRepo, infraRepo, dockerService, kafkaProducer, logger)
+	stackService := services.NewStackService(
+		stackRepo,
+		infraRepo,
+		nginxService,
+		pgService,
+		clusterService,
+		clusterRepo,
+		pgDatabaseService,
+		dockerSvcService,
+		nginxClusterService,
+		nginxClusterRepo,
+		dinDService,
+	)
 
 	kafkaConsumer := kafka.NewEventConsumer(envConfig.KafkaEnv, cacheService, logger)
 	defer kafkaConsumer.Close()
@@ -105,11 +137,9 @@ func main() {
 		logger.Error("failed to start kafka consumer", zap.Error(err))
 	}
 
-	// Initialize WebSocket handler
 	wsHandler := httpHandler.NewWebSocketHandler(logger)
 	go wsHandler.Start()
 
-	// Initialize Docker Event Listener
 	eventListenerService := services.NewDockerEventListenerService(
 		dockerService,
 		kafkaProducer,
@@ -127,9 +157,11 @@ func main() {
 	pgHandler := httpHandler.NewPostgreSQLHandler(pgService)
 	nginxHandler := httpHandler.NewNginxHandler(nginxService)
 	clusterHandler := httpHandler.NewPostgreSQLClusterHandler(clusterService, logger)
+	nginxClusterHandler := httpHandler.NewNginxClusterHandler(nginxClusterService, logger)
+	k8sClusterHandler := httpHandler.NewK8sClusterHandler(k8sClusterService, logger)
 	pgDatabaseHandler := httpHandler.NewPostgresDatabaseHandler(pgDatabaseService)
-	dockerHandler := httpHandler.NewDockerServiceHandler(dockerSvcService)
 	stackHandler := httpHandler.NewStackHandler(stackService)
+	dinDHandler := httpHandler.NewDinDHandler(dinDService, logger)
 
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
@@ -145,15 +177,16 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// WebSocket endpoint (no auth required for now, can add later)
 	r.GET("/ws", wsHandler.HandleWebSocket)
 
 	apiV1 := r.Group("/api/v1", jwtMiddleware.CheckBearerAuth())
 	pgHandler.RegisterRoutes(apiV1)
 	nginxHandler.RegisterRoutes(apiV1)
+	nginxClusterHandler.RegisterRoutes(apiV1)
+	k8sClusterHandler.RegisterRoutes(apiV1)
 	pgDatabaseHandler.RegisterRoutes(apiV1)
-	dockerHandler.RegisterRoutes(apiV1)
 	stackHandler.RegisterRoutes(apiV1)
+	dinDHandler.RegisterRoutes(apiV1)
 
 	// PostgreSQL Cluster routes
 	clusterGroup := apiV1.Group("/postgres/cluster")
@@ -200,6 +233,15 @@ func main() {
 		// Query & Replication Test
 		clusterGroup.POST("/:id/query", clusterHandler.ExecuteQuery)
 		clusterGroup.POST("/:id/test-replication", clusterHandler.TestReplication)
+
+		// Connection Management
+		clusterGroup.POST("/:id/test-connection", clusterHandler.TestConnection)
+		clusterGroup.GET("/:id/connection-info", clusterHandler.GetConnectionInfo)
+
+		// Schema Browser
+		clusterGroup.GET("/:id/databases/:database/tables", clusterHandler.GetTables)
+		clusterGroup.GET("/:id/databases/:database/tables/:table/schema", clusterHandler.GetTableSchema)
+		clusterGroup.GET("/:id/databases/:database/tables/:table/data", clusterHandler.GetTableData)
 	}
 
 	quit := make(chan os.Signal, 1)

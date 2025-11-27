@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Database, RefreshCw, Play, Square, RotateCcw, Crown, Plus, Minus, Copy, Download } from 'lucide-react';
-import { postgresAPI, nginxAPI, dockerAPI, clusterAPI } from '../api';
+import { X, Database, RefreshCw, Play, Square, RotateCcw, Crown, Plus, Minus, Copy, Download, Globe, AlertTriangle, Activity, Edit3, Settings, Upload } from 'lucide-react';
+import { postgresAPI, nginxAPI, clusterAPI, nginxClusterAPI, dinDAPI } from '../api';
 import StatusBadge from './common/StatusBadge';
 import ResourceIcon from './common/ResourceIcon';
 import toast from 'react-hot-toast';
@@ -28,6 +28,12 @@ const InfrastructureDetailModal = ({ isOpen, onClose, resource, onRefresh }) => 
           response = await nginxAPI.getById(resource.infrastructure_id);
           setDetails(response.data?.data || response.data);
           break;
+        case 'NGINX_CLUSTER': {
+          const clusterId = resource.outputs?.cluster_id || resource.infrastructure_id;
+          response = await nginxClusterAPI.getById(clusterId);
+          setDetails(response.data?.data || response.data);
+          break;
+        }
         
         case 'POSTGRES_INSTANCE':
           response = await postgresAPI.getById(resource.infrastructure_id);
@@ -41,8 +47,8 @@ const InfrastructureDetailModal = ({ isOpen, onClose, resource, onRefresh }) => 
           setDetails(response.data?.data || response.data);
           break;
         
-        case 'DOCKER_SERVICE':
-          response = await dockerAPI.getById(resource.infrastructure_id);
+        case 'DIND_ENVIRONMENT':
+          response = await dinDAPI.getEnvironment(resource.infrastructure_id);
           setDetails(response.data?.data || response.data);
           break;
         
@@ -100,12 +106,14 @@ const InfrastructureDetails = ({ resourceType, details, onRefresh, onClose }) =>
   switch (resourceType) {
     case 'NGINX_GATEWAY':
       return <NginxDetails details={details} onRefresh={onRefresh} onClose={onClose} />;
+    case 'NGINX_CLUSTER':
+      return <NginxClusterDetails details={details} onRefresh={onRefresh} onClose={onClose} />;
     case 'POSTGRES_INSTANCE':
       return <PostgresDetails details={details} onRefresh={onRefresh} onClose={onClose} />;
     case 'POSTGRES_CLUSTER':
       return <PostgresClusterDetails details={details} onRefresh={onRefresh} onClose={onClose} />;
-    case 'DOCKER_SERVICE':
-      return <DockerServiceDetails details={details} onRefresh={onRefresh} onClose={onClose} />;
+    case 'DIND_ENVIRONMENT':
+      return <DinDEnvironmentDetails details={details} onRefresh={onRefresh} onClose={onClose} />;
     default:
       return <div>Unsupported infrastructure type</div>;
   }
@@ -177,6 +185,370 @@ const NginxDetails = ({ details, onRefresh, onClose }) => {
               <li key={idx}>{domain.domain_name}</li>
             ))}
           </ul>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const NginxClusterDetails = ({ details, onRefresh, onClose }) => {
+  const clusterId = details?.id || details?.cluster_id;
+  const [clusterInfo, setClusterInfo] = useState(details);
+  const [loading, setLoading] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [configText, setConfigText] = useState(details?.nginx_config || '');
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [syncingConfig, setSyncingConfig] = useState(false);
+
+  const reload = async () => {
+    if (!clusterId) return;
+    setLoading(true);
+    try {
+      const resp = await nginxClusterAPI.getById(clusterId);
+      const data = resp.data?.data || resp.data;
+      setClusterInfo(data);
+      setTestResult(null);
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to refresh cluster info');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAction = async (action) => {
+    if (!clusterId) return;
+    setLoading(true);
+    try {
+      switch (action) {
+        case 'start':
+          await nginxClusterAPI.start(clusterId);
+          toast.success('Cluster started');
+          break;
+        case 'stop':
+          await nginxClusterAPI.stop(clusterId);
+          toast.success('Cluster stopped');
+          break;
+        case 'restart':
+          await nginxClusterAPI.restart(clusterId);
+          toast.success('Cluster restarted');
+          break;
+        case 'test':
+          const resp = await nginxClusterAPI.testConnection(clusterId);
+          const result = resp.data?.data || resp.data;
+          setTestResult(result);
+          if (result?.success) {
+            toast.success(`Connection OK via ${result?.node_name || 'master'}`);
+          } else {
+            toast.error(result?.message || 'Test failed');
+          }
+          setLoading(false);
+          return;
+        default:
+          break;
+      }
+      await reload();
+    } catch (error) {
+      toast.error(error.response?.data?.message || `Failed to ${action} cluster`);
+      setLoading(false);
+    }
+  };
+
+  const handleOpenConfigModal = () => {
+    setConfigText(clusterInfo?.nginx_config || getDefaultNginxConfig());
+    setShowConfigModal(true);
+  };
+
+  const handleSaveConfig = async (reloadAll = false) => {
+    if (!clusterId || !configText.trim()) return;
+    setSavingConfig(true);
+    try {
+      await nginxClusterAPI.updateConfig(clusterId, {
+        nginx_config: configText,
+        reload_all: reloadAll
+      });
+      toast.success(reloadAll ? 'Config saved and synced to all nodes!' : 'Config saved successfully!');
+      setShowConfigModal(false);
+      await reload();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to save config');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const handleSyncConfig = async () => {
+    if (!clusterId) return;
+    setSyncingConfig(true);
+    try {
+      await nginxClusterAPI.syncConfig(clusterId);
+      toast.success('Config synced to all nodes!');
+      await reload();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to sync config');
+    } finally {
+      setSyncingConfig(false);
+    }
+  };
+
+  const getDefaultNginxConfig = () => {
+    return `# Nginx Configuration for ${clusterInfo?.cluster_name || 'cluster'}
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections ${clusterInfo?.worker_connections || 2048};
+    use epoll;
+    multi_accept on;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout ${clusterInfo?.keepalive_timeout || 65};
+    types_hash_max_size 2048;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml;
+
+    # Default server
+    server {
+        listen ${clusterInfo?.http_port || 80};
+        server_name localhost;
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html index.htm;
+        }
+
+        location /health {
+            access_log off;
+            return 200 "healthy\\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}`;
+  };
+
+  if (!clusterInfo) {
+    return (
+      <div className="infrastructure-details">
+        <div className="detail-section">
+          <div className="detail-grid">
+            <div className="detail-item">
+              <span className="label">Cluster</span>
+              <span className="value">Not available</span>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={reload}>
+              <RefreshCw size={14} /> Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const nodes = clusterInfo.nodes || [];
+
+  return (
+    <div className="infrastructure-details">
+      <div className="detail-section">
+        <h3>Cluster Actions</h3>
+        <div className="action-buttons">
+          <button className="btn btn-sm btn-secondary" onClick={() => handleAction('start')} disabled={loading}>
+            {loading ? <RefreshCw size={14} className="spin" /> : <Play size={14} />} Start
+          </button>
+          <button className="btn btn-sm btn-secondary" onClick={() => handleAction('stop')} disabled={loading}>
+            {loading ? <RefreshCw size={14} className="spin" /> : <Square size={14} />} Stop
+          </button>
+          <button className="btn btn-sm btn-secondary" onClick={() => handleAction('restart')} disabled={loading}>
+            {loading ? <RefreshCw size={14} className="spin" /> : <RotateCcw size={14} />} Restart
+          </button>
+          <button className="btn btn-sm btn-primary" onClick={() => handleAction('test')} disabled={loading}>
+            {loading ? <RefreshCw size={14} className="spin" /> : <Activity size={14} />}
+            Test Connection
+          </button>
+          <button className="btn btn-sm btn-outline" onClick={reload} disabled={loading}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
+        
+        {/* Config Actions */}
+        <div className="action-buttons" style={{ marginTop: '12px' }}>
+          <button className="btn btn-sm btn-warning" onClick={handleOpenConfigModal} disabled={loading}>
+            <Edit3 size={14} /> Edit Config
+          </button>
+          <button className="btn btn-sm btn-info" onClick={handleSyncConfig} disabled={syncingConfig || loading}>
+            {syncingConfig ? <RefreshCw size={14} className="spin" /> : <Upload size={14} />}
+            Sync to All Nodes
+          </button>
+        </div>
+        
+        {testResult && (
+          <div className={`alert ${testResult.success ? 'success' : 'danger'}`}>
+            <AlertTriangle size={14} />
+            <span>{testResult.message || (testResult.success ? 'Healthy' : 'Failed')}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="detail-section">
+        <h3>Cluster Summary</h3>
+        <div className="detail-grid">
+          <div className="detail-item">
+            <span className="label">Status:</span>
+            <StatusBadge status={clusterInfo.status} />
+          </div>
+          <div className="detail-item">
+            <span className="label">Virtual IP:</span>
+            <span className="value">{clusterInfo.virtual_ip || 'N/A'}</span>
+          </div>
+          <div className="detail-item">
+            <span className="label">HTTP Port:</span>
+            <span className="value">{clusterInfo.http_port}</span>
+          </div>
+          <div className="detail-item">
+            <span className="label">HTTPS Port:</span>
+            <span className="value">{clusterInfo.https_port || 'N/A'}</span>
+          </div>
+          <div className="detail-item">
+            <span className="label">Load Balancing:</span>
+            <span className="value">{clusterInfo.load_balance_mode || 'round_robin'}</span>
+          </div>
+          <div className="detail-item">
+            <span className="label">SSL Enabled:</span>
+            <span className="value">{clusterInfo.ssl_enabled ? 'Yes' : 'No'}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="detail-section">
+        <h3>Nodes</h3>
+        {nodes.length === 0 ? (
+          <p className="text-muted">No nodes reported</p>
+        ) : (
+          <table className="detail-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>IP</th>
+                <th>Port</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nodes.map(node => (
+                <tr key={node.id}>
+                  <td>{node.name}</td>
+                  <td>{node.role}</td>
+                  <td>
+                    <StatusBadge status={node.status} />
+                  </td>
+                  <td>{node.ip_address || 'N/A'}</td>
+                  <td>{node.http_port}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {clusterInfo.upstreams?.length > 0 && (
+        <div className="detail-section">
+          <h3>Upstreams</h3>
+          <ul className="detail-list">
+            {clusterInfo.upstreams.map(upstream => (
+              <li key={upstream.id}>
+                <strong>{upstream.name}</strong> • {upstream.algorithm || 'round_robin'} •{' '}
+                {upstream.servers?.length || 0} servers
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {clusterInfo.server_blocks?.length > 0 && (
+        <div className="detail-section">
+          <h3>Server Blocks</h3>
+          <ul className="detail-list">
+            {clusterInfo.server_blocks.map(block => (
+              <li key={block.id}>
+                <Globe size={14} /> {block.server_name} • port {block.listen_port} •{' '}
+                {block.ssl_enabled ? 'HTTPS' : 'HTTP'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Edit Config Modal */}
+      {showConfigModal && (
+        <div className="modal-overlay inner-modal" onClick={() => setShowConfigModal(false)}>
+          <div className="config-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3><Settings size={20} /> Edit Nginx Configuration</h3>
+              <button className="close-btn" onClick={() => setShowConfigModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="config-info">
+                <p>Edit the nginx.conf for this cluster. Changes can be saved and optionally synced to all nodes.</p>
+              </div>
+              <div className="form-group">
+                <label>nginx.conf</label>
+                <textarea 
+                  className="config-editor"
+                  value={configText}
+                  onChange={(e) => setConfigText(e.target.value)}
+                  rows={20}
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => setShowConfigModal(false)}
+                disabled={savingConfig}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={() => handleSaveConfig(false)}
+                disabled={savingConfig || !configText.trim()}
+              >
+                {savingConfig ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
+                Save Only
+              </button>
+              <button 
+                className="btn btn-success" 
+                onClick={() => handleSaveConfig(true)}
+                disabled={savingConfig || !configText.trim()}
+              >
+                {savingConfig ? <RefreshCw size={14} className="spin" /> : <Upload size={14} />}
+                Save & Sync All
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -732,15 +1104,33 @@ const PostgresClusterDetails = ({ details, onRefresh, onClose }) => {
   );
 };
 
-const DockerServiceDetails = ({ details, onRefresh, onClose }) => {
+const DinDEnvironmentDetails = ({ details, onRefresh, onClose }) => {
   const [deleting, setDeleting] = useState(false);
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    if (details?.id) {
+      loadStats();
+    }
+  }, [details]);
+
+  const loadStats = async () => {
+    try {
+      const response = await dinDAPI.getStats(details.id);
+      if (response.data?.success) {
+        setStats(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error loading stats:', error);
+    }
+  };
 
   const handleDelete = async () => {
-    if (window.confirm(`Delete Docker Service "${details.name}"? This cannot be undone!`)) {
+    if (window.confirm(`Delete DinD Environment "${details.name}"? All containers and images inside will be lost!`)) {
       setDeleting(true);
       try {
-        await dockerAPI.delete(details.id);
-        toast.success('Docker Service deleted successfully');
+        await dinDAPI.deleteEnvironment(details.id);
+        toast.success('DinD Environment deleted successfully');
         onClose();
         if (onRefresh) onRefresh();
       } catch (error) {
@@ -780,8 +1170,8 @@ const DockerServiceDetails = ({ details, onRefresh, onClose }) => {
             <StatusBadge status={details.status} />
           </div>
           <div className="detail-item">
-            <span className="label">Image:</span>
-            <span className="value">{details.image}</span>
+            <span className="label">Resource Plan:</span>
+            <span className="value">{details.resource_plan}</span>
           </div>
           <div className="detail-item">
             <span className="label">Container ID:</span>
@@ -790,28 +1180,30 @@ const DockerServiceDetails = ({ details, onRefresh, onClose }) => {
         </div>
       </div>
 
-      {details.ports && details.ports.length > 0 && (
+      {stats && (
         <div className="detail-section">
-          <h3>Ports</h3>
-          <ul>
-            {details.ports.map((port, idx) => (
-              <li key={idx}>{port.container_port}:{port.host_port} ({port.protocol})</li>
-            ))}
-          </ul>
+          <h3>Statistics</h3>
+          <div className="detail-grid">
+            <div className="detail-item">
+              <span className="label">Containers:</span>
+              <span className="value">{stats.container_count || 0}</span>
+            </div>
+            <div className="detail-item">
+              <span className="label">Images:</span>
+              <span className="value">{stats.image_count || 0}</span>
+            </div>
+            <div className="detail-item">
+              <span className="label">Memory Usage:</span>
+              <span className="value">{stats.memory_percent?.toFixed(1) || 0}%</span>
+            </div>
+          </div>
         </div>
       )}
 
-      {details.env_vars && details.env_vars.length > 0 && (
+      {details.description && (
         <div className="detail-section">
-          <h3>Environment Variables</h3>
-          <div className="env-vars-list">
-            {details.env_vars.map((env, idx) => (
-              <div key={idx} className="env-var-item">
-                <span className="env-key">{env.key}:</span>
-                <span className="env-value">{env.is_secret ? '****' : env.value}</span>
-              </div>
-            ))}
-          </div>
+          <h3>Description</h3>
+          <p>{details.description}</p>
         </div>
       )}
     </div>

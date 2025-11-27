@@ -32,14 +32,17 @@ type IStackService interface {
 }
 
 type stackService struct {
-	stackRepo      repositories.IStackRepository
-	infraRepo      repositories.IInfrastructureRepository
-	nginxService   INginxService
-	pgService      IPostgreSQLService
-	clusterService IPostgreSQLClusterService
-	clusterRepo    repositories.IPostgreSQLClusterRepository
-	pgDbService    IPostgresDatabaseService
-	dockerService  IDockerServiceService
+	stackRepo           repositories.IStackRepository
+	infraRepo           repositories.IInfrastructureRepository
+	nginxService        INginxService
+	pgService           IPostgreSQLService
+	clusterService      IPostgreSQLClusterService
+	clusterRepo         repositories.IPostgreSQLClusterRepository
+	pgDbService         IPostgresDatabaseService
+	dockerService       IDockerServiceService
+	nginxClusterService INginxClusterService
+	nginxClusterRepo    repositories.INginxClusterRepository
+	dindService         IDinDService
 }
 
 func NewStackService(
@@ -51,16 +54,22 @@ func NewStackService(
 	clusterRepo repositories.IPostgreSQLClusterRepository,
 	pgDbService IPostgresDatabaseService,
 	dockerService IDockerServiceService,
+	nginxClusterService INginxClusterService,
+	nginxClusterRepo repositories.INginxClusterRepository,
+	dindService IDinDService,
 ) IStackService {
 	return &stackService{
-		stackRepo:      stackRepo,
-		infraRepo:      infraRepo,
-		nginxService:   nginxService,
-		pgService:      pgService,
-		clusterService: clusterService,
-		clusterRepo:    clusterRepo,
-		pgDbService:    pgDbService,
-		dockerService:  dockerService,
+		stackRepo:           stackRepo,
+		infraRepo:           infraRepo,
+		nginxService:        nginxService,
+		pgService:           pgService,
+		clusterService:      clusterService,
+		clusterRepo:         clusterRepo,
+		pgDbService:         pgDbService,
+		dockerService:       dockerService,
+		nginxClusterService: nginxClusterService,
+		nginxClusterRepo:    nginxClusterRepo,
+		dindService:         dindService,
 	}
 }
 
@@ -85,7 +94,6 @@ func (s *stackService) CreateStack(ctx context.Context, userID string, req dto.C
 		return nil, fmt.Errorf("failed to create stack: %w", err)
 	}
 
-	// Create operation tracking
 	operation := &entities.StackOperation{
 		ID:            uuid.New().String(),
 		StackID:       stackID,
@@ -96,7 +104,6 @@ func (s *stackService) CreateStack(ctx context.Context, userID string, req dto.C
 	}
 	s.stackRepo.CreateOperation(operation)
 
-	// Create resources in order
 	resourceMap := make(map[string]string) // name -> infrastructure_id
 
 	for _, resInput := range req.Resources {
@@ -137,7 +144,6 @@ func (s *stackService) CreateStack(ctx context.Context, userID string, req dto.C
 	stack.Status = entities.StackStatusRunning
 	s.stackRepo.Update(stack)
 
-	// Complete operation
 	operation.Status = "COMPLETED"
 	now := time.Now()
 	operation.CompletedAt = &now
@@ -297,9 +303,66 @@ func (s *stackService) createResource(ctx context.Context, userID, stackID strin
 		}
 		return resp.InfrastructureID, nil
 
+	case "NGINX_CLUSTER":
+		var clusterReq dto.CreateNginxClusterRequest
+		if err := json.Unmarshal(specJSON, &clusterReq); err != nil {
+			return "", err
+		}
+		clusterReq.ClusterName = resInput.Name
+
+		if clusterReq.NodeCount == 0 {
+			clusterReq.NodeCount = 2
+		}
+		if clusterReq.HTTPPort == 0 {
+			clusterReq.HTTPPort = 8080
+		}
+		if clusterReq.HealthCheckPath == "" {
+			clusterReq.HealthCheckPath = "/health"
+		}
+
+		resp, err := s.nginxClusterService.CreateCluster(ctx, userID, clusterReq)
+		if err != nil {
+			return "", err
+		}
+		return resp.InfrastructureID, nil
+
+	case "DIND_ENVIRONMENT":
+		var dindReq dto.CreateDinDEnvironmentRequest
+		if err := json.Unmarshal(specJSON, &dindReq); err != nil {
+			return "", err
+		}
+		dindReq.Name = resInput.Name
+
+		// Set defaults
+		if dindReq.ResourcePlan == "" {
+			dindReq.ResourcePlan = "medium"
+		}
+
+		resp, err := s.dindService.CreateEnvironment(ctx, userID, dindReq)
+		if err != nil {
+			return "", err
+		}
+		return resp.InfrastructureID, nil
+
 	default:
 		return "", fmt.Errorf("unsupported resource type: %s", resInput.Type)
 	}
+}
+
+func (s *stackService) getPostgresClusterIDByInfra(infraID string) (string, error) {
+	cluster, err := s.clusterRepo.FindByInfrastructureID(infraID)
+	if err != nil {
+		return "", err
+	}
+	return cluster.ID, nil
+}
+
+func (s *stackService) getNginxClusterIDByInfra(infraID string) (string, error) {
+	cluster, err := s.nginxClusterRepo.FindByInfrastructureID(infraID)
+	if err != nil {
+		return "", err
+	}
+	return cluster.ID, nil
 }
 
 func (s *stackService) GetStack(ctx context.Context, stackID string) (*dto.StackInfo, error) {
@@ -401,6 +464,20 @@ func (s *stackService) getResourceOutputs(ctx context.Context, resourceType, inf
 		if docker, err := s.dockerService.GetDockerService(ctx, infraID); err == nil {
 			outputs["service_name"] = docker.Name
 			outputs["status"] = docker.Status
+		}
+	case "NGINX_CLUSTER":
+		if clusterEntity, err := s.nginxClusterRepo.FindByInfrastructureID(infraID); err == nil {
+			if cluster, err := s.nginxClusterService.GetClusterInfo(ctx, clusterEntity.ID); err == nil {
+				outputs["cluster_id"] = clusterEntity.ID
+				outputs["cluster_name"] = cluster.ClusterName
+				outputs["status"] = cluster.Status
+				outputs["virtual_ip"] = cluster.VirtualIP
+				outputs["node_count"] = cluster.NodeCount
+				outputs["http_port"] = cluster.HTTPPort
+				if cluster.HTTPSPort > 0 {
+					outputs["https_port"] = cluster.HTTPSPort
+				}
+			}
 		}
 	}
 
@@ -513,9 +590,26 @@ func (s *stackService) deleteResource(ctx context.Context, resourceType, infraID
 	case "POSTGRES_INSTANCE":
 		return s.pgService.DeletePostgreSQL(ctx, infraID)
 	case "POSTGRES_CLUSTER":
-		return s.clusterService.DeleteCluster(ctx, infraID)
+		clusterID, err := s.getPostgresClusterIDByInfra(infraID)
+		if err != nil {
+			return err
+		}
+		return s.clusterService.DeleteCluster(ctx, clusterID)
 	case "DOCKER_SERVICE":
 		return s.dockerService.DeleteDockerService(ctx, infraID)
+	case "NGINX_CLUSTER":
+		clusterID, err := s.getNginxClusterIDByInfra(infraID)
+		if err != nil {
+			return err
+		}
+		return s.nginxClusterService.DeleteCluster(ctx, clusterID)
+	case "DIND_ENVIRONMENT":
+		// Get DinD environment by infrastructure ID
+		dindEnv, err := s.dindService.GetEnvironmentByInfraID(ctx, infraID)
+		if err != nil {
+			return err
+		}
+		return s.dindService.DeleteEnvironment(ctx, dindEnv.ID)
 	}
 	return nil
 }
@@ -541,11 +635,21 @@ func (s *stackService) StartStack(ctx context.Context, stackID string) error {
 		case "POSTGRES_INSTANCE":
 			s.pgService.StartPostgreSQL(ctx, res.InfrastructureID)
 		case "POSTGRES_CLUSTER":
-			s.clusterService.StartCluster(ctx, res.InfrastructureID)
+			if clusterID, err := s.getPostgresClusterIDByInfra(res.InfrastructureID); err == nil {
+				s.clusterService.StartCluster(ctx, clusterID)
+			}
 		case "DOCKER_SERVICE":
 			s.dockerService.StartDockerService(ctx, res.InfrastructureID)
 		case "NGINX_GATEWAY":
 			s.nginxService.StartNginx(ctx, res.InfrastructureID)
+		case "NGINX_CLUSTER":
+			if clusterID, err := s.getNginxClusterIDByInfra(res.InfrastructureID); err == nil {
+				s.nginxClusterService.StartCluster(ctx, clusterID)
+			}
+		case "DIND_ENVIRONMENT":
+			if dindEnv, err := s.dindService.GetEnvironmentByInfraID(ctx, res.InfrastructureID); err == nil {
+				s.dindService.StartEnvironment(ctx, dindEnv.ID)
+			}
 		}
 	}
 
@@ -561,12 +665,22 @@ func (s *stackService) StopStack(ctx context.Context, stackID string) error {
 		switch res.ResourceType {
 		case "NGINX_GATEWAY":
 			s.nginxService.StopNginx(ctx, res.InfrastructureID)
+		case "NGINX_CLUSTER":
+			if clusterID, err := s.getNginxClusterIDByInfra(res.InfrastructureID); err == nil {
+				s.nginxClusterService.StopCluster(ctx, clusterID)
+			}
 		case "DOCKER_SERVICE":
 			s.dockerService.StopDockerService(ctx, res.InfrastructureID)
 		case "POSTGRES_CLUSTER":
-			s.clusterService.StopCluster(ctx, res.InfrastructureID)
+			if clusterID, err := s.getPostgresClusterIDByInfra(res.InfrastructureID); err == nil {
+				s.clusterService.StopCluster(ctx, clusterID)
+			}
 		case "POSTGRES_INSTANCE":
 			s.pgService.StopPostgreSQL(ctx, res.InfrastructureID)
+		case "DIND_ENVIRONMENT":
+			if dindEnv, err := s.dindService.GetEnvironmentByInfraID(ctx, res.InfrastructureID); err == nil {
+				s.dindService.StopEnvironment(ctx, dindEnv.ID)
+			}
 		}
 	}
 

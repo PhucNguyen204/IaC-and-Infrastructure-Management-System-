@@ -1,211 +1,141 @@
 import React, { useState, useEffect } from 'react';
+import { Activity, Database, Globe, Container, RefreshCw } from 'lucide-react';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { stackAPI } from '../../api';
-import toast from 'react-hot-toast';
+import { stackAPI, monitoringAPI } from '../../api';
+import MonitoringPanel from '../monitoring/MonitoringPanel';
 import './StackMetricsTab.css';
 
-const StackMetricsTab = ({ stackId }) => {
-  const [metrics, setMetrics] = useState(null);
-  const [timeRange, setTimeRange] = useState('24h');
+const StackMetricsTab = ({ stackId, resources = [] }) => {
+  const [selectedResource, setSelectedResource] = useState(null);
+  const [infrastructureList, setInfrastructureList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [autoRefresh, setAutoRefresh] = useState(false);
 
   useEffect(() => {
-    loadMetrics();
-    
-    let interval;
-    if (autoRefresh) {
-      interval = setInterval(loadMetrics, 30000); // Refresh every 30s
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [stackId, timeRange, autoRefresh]);
+    loadInfrastructure();
+  }, []);
 
-  const loadMetrics = async () => {
+  const loadInfrastructure = async () => {
     try {
-      setLoading(true);
-      const response = await stackAPI.getMetrics(stackId, timeRange);
-      setMetrics(response.data);
+      const response = await monitoringAPI.listInfrastructure();
+      if (response.data?.data) {
+        setInfrastructureList(response.data.data);
+      }
     } catch (error) {
-      console.error('Error loading metrics:', error);
-      // Mock data for demo
-      setMetrics(generateMockMetrics());
+      console.error('Error loading infrastructure:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const generateMockMetrics = () => {
-    const now = Date.now();
-    const data = [];
-    for (let i = 23; i >= 0; i--) {
-      data.push({
-        time: new Date(now - i * 3600000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        cpu: 30 + Math.random() * 40,
-        memory: 50 + Math.random() * 30,
-        qps: 2000 + Math.random() * 1000,
-        latency: 20 + Math.random() * 40,
-        requests: 1000 + Math.random() * 500,
-        errors: Math.random() * 50
-      });
+  const getResourceIcon = (type) => {
+    switch (type?.toUpperCase()) {
+      case 'POSTGRES_CLUSTER':
+        return <Database size={18} className="resource-icon postgres" />;
+      case 'NGINX_GATEWAY':
+        return <Globe size={18} className="resource-icon nginx" />;
+      case 'DOCKER_SERVICE':
+        return <Container size={18} className="resource-icon docker" />;
+      default:
+        return <Activity size={18} className="resource-icon" />;
     }
-    return {
-      cpu: data,
-      memory: data,
-      database: data,
-      nginx: data
-    };
   };
 
+  // Combine resources from stack with infrastructure list
+  const monitoredResources = resources.map(r => ({
+    ...r,
+    monitored: infrastructureList.some(i => i.id === r.resource_id || i.id === r.infrastructure_id)
+  }));
+
   if (loading) {
-    return <div className="loading-metrics">Loading metrics...</div>;
+    return (
+      <div className="stack-metrics-tab loading">
+        <RefreshCw className="spin" size={32} />
+        <p>Loading monitoring data...</p>
+      </div>
+    );
   }
 
   return (
     <div className="stack-metrics-tab">
       <div className="metrics-header">
-        <h3>Stack Metrics</h3>
-        <div className="metrics-controls">
-          <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)}>
-            <option value="1h">Last 1 hour</option>
-            <option value="6h">Last 6 hours</option>
-            <option value="24h">Last 24 hours</option>
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-          </select>
-          <label className="auto-refresh">
-            <input 
-              type="checkbox" 
-              checked={autoRefresh} 
-              onChange={(e) => setAutoRefresh(e.target.checked)} 
-            />
-            <span>Auto-refresh (30s)</span>
-          </label>
+        <h3>
+          <Activity size={20} />
+          Stack Monitoring
+        </h3>
+        <p className="metrics-subtitle">
+          Real-time metrics and logs from Elasticsearch
+        </p>
+      </div>
+
+      {/* Resource Selector */}
+      <div className="resource-selector">
+        <h4>Select Resource to Monitor</h4>
+        <div className="resource-list">
+          {monitoredResources.length > 0 ? (
+            monitoredResources.map((resource, index) => (
+              <button
+                key={index}
+                className={`resource-btn ${selectedResource?.resource_id === resource.resource_id ? 'active' : ''}`}
+                onClick={() => setSelectedResource(resource)}
+              >
+                {getResourceIcon(resource.resource_type)}
+                <div className="resource-info">
+                  <span className="resource-name">{resource.resource_name || resource.resource_type}</span>
+                  <span className="resource-type">{resource.resource_type?.replace(/_/g, ' ')}</span>
+                </div>
+                {resource.monitored && (
+                  <span className="monitored-badge">Live</span>
+                )}
+              </button>
+            ))
+          ) : (
+            <div className="no-resources">
+              <p>No resources in this stack</p>
+            </div>
+          )}
+
+          {/* Show monitored infrastructure that might not be in stack */}
+          {infrastructureList.length > 0 && (
+            <>
+              <div className="resource-divider">
+                <span>All Monitored Infrastructure</span>
+              </div>
+              {infrastructureList.map((infra, index) => (
+                <button
+                  key={`infra-${index}`}
+                  className={`resource-btn ${selectedResource?.id === infra.id ? 'active' : ''}`}
+                  onClick={() => setSelectedResource({ 
+                    resource_id: infra.id, 
+                    resource_name: infra.name,
+                    resource_type: infra.type 
+                  })}
+                >
+                  <Activity size={18} className="resource-icon" />
+                  <div className="resource-info">
+                    <span className="resource-name">{infra.name}</span>
+                    <span className={`resource-status ${infra.status}`}>{infra.status}</span>
+                  </div>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
-      {/* Resource Usage */}
-      <div className="metrics-section">
-        <h4>Aggregated Resource Usage</h4>
-        <div className="chart-container">
-          <h5>CPU Usage (%)</h5>
-          <ResponsiveContainer width="100%" height={250}>
-            <AreaChart data={metrics?.cpu || []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
-              <YAxis domain={[0, 100]} />
-              <Tooltip />
-              <Legend />
-              <Area type="monotone" dataKey="cpu" stroke="#3B82F6" fill="#3B82F6" fillOpacity={0.3} name="CPU %" />
-            </AreaChart>
-          </ResponsiveContainer>
+      {/* Monitoring Panel for Selected Resource */}
+      {selectedResource ? (
+        <MonitoringPanel 
+          instanceId={selectedResource.resource_id || selectedResource.infrastructure_id}
+          instanceName={selectedResource.resource_name}
+          showLogs={true}
+        />
+      ) : (
+        <div className="select-resource-prompt">
+          <Activity size={48} />
+          <h3>Select a resource to view monitoring data</h3>
+          <p>Choose from the resources above to see real-time metrics, historical data, and logs.</p>
         </div>
-
-        <div className="chart-container">
-          <h5>Memory Usage (%)</h5>
-          <ResponsiveContainer width="100%" height={250}>
-            <AreaChart data={metrics?.memory || []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
-              <YAxis domain={[0, 100]} />
-              <Tooltip />
-              <Legend />
-              <Area type="monotone" dataKey="memory" stroke="#10B981" fill="#10B981" fillOpacity={0.3} name="Memory %" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Database Performance */}
-      <div className="metrics-section">
-        <h4>Database Performance</h4>
-        <div className="stats-row">
-          <div className="stat-box">
-            <div className="stat-label">Current QPS</div>
-            <div className="stat-value">2,500</div>
-          </div>
-          <div className="stat-box">
-            <div className="stat-label">Peak QPS</div>
-            <div className="stat-value">3,200</div>
-          </div>
-          <div className="stat-box">
-            <div className="stat-label">Avg QPS</div>
-            <div className="stat-value">2,100</div>
-          </div>
-          <div className="stat-box">
-            <div className="stat-label">Active Connections</div>
-            <div className="stat-value">45/100</div>
-          </div>
-        </div>
-
-        <div className="chart-container">
-          <h5>Query Throughput (QPS)</h5>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={metrics?.database || []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="qps" stroke="#8B5CF6" strokeWidth={2} name="Queries/sec" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="chart-container">
-          <h5>Query Latency (P95, ms)</h5>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={metrics?.database || []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="latency" stroke="#F59E0B" strokeWidth={2} name="Latency (ms)" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Nginx Traffic */}
-      <div className="metrics-section">
-        <h4>Nginx Traffic</h4>
-        <div className="stats-row">
-          <div className="stat-box">
-            <div className="stat-label">Current req/s</div>
-            <div className="stat-value">1,250</div>
-          </div>
-          <div className="stat-box">
-            <div className="stat-label">Peak req/s</div>
-            <div className="stat-value">1,800</div>
-          </div>
-          <div className="stat-box">
-            <div className="stat-label">Success Rate</div>
-            <div className="stat-value success">98.5%</div>
-          </div>
-          <div className="stat-box">
-            <div className="stat-label">Error Rate</div>
-            <div className="stat-value error">1.5%</div>
-          </div>
-        </div>
-
-        <div className="chart-container">
-          <h5>Requests & Errors</h5>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={metrics?.nginx || []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="requests" fill="#10B981" name="Requests" />
-              <Bar dataKey="errors" fill="#EF4444" name="Errors" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      )}
     </div>
   );
 };

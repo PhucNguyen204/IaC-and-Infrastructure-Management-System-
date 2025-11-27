@@ -55,6 +55,15 @@ type IPostgreSQLClusterService interface {
 	// Query & Replication Test
 	ExecuteQuery(ctx context.Context, clusterID string, req dto.ExecuteQueryRequest) (*dto.QueryResult, error)
 	TestReplication(ctx context.Context, clusterID string) (*dto.ReplicationTestResult, error)
+
+	// Connection Management
+	TestConnection(ctx context.Context, clusterID string, req dto.TestConnectionRequest) (*dto.TestConnectionResponse, error)
+	GetConnectionInfo(ctx context.Context, clusterID string) (*dto.ConnectionInfoResponse, error)
+
+	// Schema Browser
+	GetTables(ctx context.Context, clusterID, database string) ([]dto.TableInfo, error)
+	GetTableSchema(ctx context.Context, clusterID, database, table string) (*dto.TableSchemaResponse, error)
+	GetTableData(ctx context.Context, clusterID, database, table, page, limit string) (*dto.QueryResult, error)
 }
 
 type postgreSQLClusterService struct {
@@ -548,12 +557,20 @@ func (s *postgreSQLClusterService) GetClusterInfo(ctx context.Context, clusterID
 			continue
 		}
 
+		// Get real-time status from Docker
+		nodeStatus := "unknown"
+		if node.ContainerID != "" {
+			if containerInfo, err := s.dockerSvc.InspectContainer(ctx, node.ContainerID); err == nil {
+				nodeStatus = containerInfo.State.Status
+			}
+		}
+
 		nodeInfos = append(nodeInfos, dto.ClusterNodeInfo{
 			NodeID:           node.ID,
 			NodeName:         fmt.Sprintf("node-%s", node.Role),
 			ContainerID:      node.ContainerID,
 			Role:             node.Role,
-			Status:           "running",
+			Status:           nodeStatus,
 			ReplicationDelay: int(node.ReplicationDelay),
 			IsHealthy:        node.IsHealthy,
 		})
@@ -1636,4 +1653,345 @@ func (s *postgreSQLClusterService) TestReplication(ctx context.Context, clusterI
 func extractNodeIndex(containerID string) int {
 	// This is a helper - in real implementation, you'd query container name
 	return 0
+}
+
+// TestConnection tests database connection to the cluster
+func (s *postgreSQLClusterService) TestConnection(ctx context.Context, clusterID string, req dto.TestConnectionRequest) (*dto.TestConnectionResponse, error) {
+	s.logger.Info("testing connection", zap.String("cluster_id", clusterID))
+
+	cluster, err := s.clusterRepo.FindByID(clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("cluster not found: %w", err)
+	}
+
+	// Get primary node
+	nodesList, err := s.clusterRepo.ListNodes(clusterID)
+	if err != nil || len(nodesList) == 0 {
+		return nil, fmt.Errorf("no nodes available")
+	}
+
+	// Convert to pointer slice
+	nodes := make([]*entities.ClusterNode, len(nodesList))
+	for i := range nodesList {
+		nodes[i] = &nodesList[i]
+	}
+
+	var primaryNode *entities.ClusterNode
+	for _, node := range nodes {
+		if node.Role == "primary" || node.ID == cluster.PrimaryNodeID {
+			primaryNode = node
+			break
+		}
+	}
+	if primaryNode == nil {
+		primaryNode = nodes[0]
+	}
+
+	// Default values
+	database := "postgres"
+	if req.Database != "" {
+		database = req.Database
+	}
+
+	// Test connection by running a simple query
+	startTime := time.Now()
+	testCmd := []string{
+		"psql", "-U", "postgres", "-d", database, "-t", "-A", "-c",
+		"SELECT version();",
+	}
+
+	output, err := s.dockerSvc.ExecCommand(ctx, primaryNode.ContainerID, testCmd)
+	latency := time.Since(startTime)
+
+	if err != nil {
+		return &dto.TestConnectionResponse{
+			Success: false,
+			Message: fmt.Sprintf("Connection failed: %v", err),
+			Latency: latency.String(),
+		}, nil
+	}
+
+	// Get node role
+	nodeRole := "primary"
+	roleCmd := []string{"curl", "-s", "http://localhost:8008"}
+	roleOutput, _ := s.dockerSvc.ExecCommand(ctx, primaryNode.ContainerID, roleCmd)
+	if strings.Contains(roleOutput, `"role": "replica"`) {
+		nodeRole = "replica"
+	}
+
+	return &dto.TestConnectionResponse{
+		Success:       true,
+		Message:       "Connection successful",
+		Latency:       latency.String(),
+		ServerVersion: strings.TrimSpace(output),
+		NodeName:      primaryNode.Role,
+		NodeRole:      nodeRole,
+		ConnectionURL: fmt.Sprintf("postgresql://postgres@localhost:%d/%s", primaryNode.Port, database),
+	}, nil
+}
+
+// GetConnectionInfo returns detailed connection information
+func (s *postgreSQLClusterService) GetConnectionInfo(ctx context.Context, clusterID string) (*dto.ConnectionInfoResponse, error) {
+	s.logger.Info("getting connection info", zap.String("cluster_id", clusterID))
+
+	cluster, err := s.clusterRepo.FindByID(clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("cluster not found: %w", err)
+	}
+
+	infra, err := s.infraRepo.FindByID(cluster.InfrastructureID)
+	if err != nil {
+		return nil, fmt.Errorf("infrastructure not found: %w", err)
+	}
+
+	nodesList, err := s.clusterRepo.ListNodes(clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes: %w", err)
+	}
+
+	// Convert to pointer slice
+	nodes := make([]*entities.ClusterNode, len(nodesList))
+	for i := range nodesList {
+		nodes[i] = &nodesList[i]
+	}
+
+	// Build endpoints
+	var primaryEndpoint dto.DirectEndpoint
+	replicaEndpoints := make([]dto.DirectEndpoint, 0)
+
+	for _, node := range nodes {
+		endpoint := dto.DirectEndpoint{
+			NodeID:        node.ID,
+			NodeName:      node.Role,
+			Role:          node.Role,
+			Host:          "localhost",
+			Port:          node.Port,
+			ConnectionURL: fmt.Sprintf("postgresql://postgres@localhost:%d/postgres", node.Port),
+			IsHealthy:     node.IsHealthy,
+		}
+
+		if node.Role == "primary" || node.ID == cluster.PrimaryNodeID {
+			endpoint.Role = "primary"
+			primaryEndpoint = endpoint
+		} else {
+			endpoint.Role = "replica"
+			replicaEndpoints = append(replicaEndpoints, endpoint)
+		}
+	}
+
+	// HAProxy endpoints (if available)
+	haproxyPort := 5000
+	haproxyReadPort := 5001
+	haproxyStatsPort := 7000
+
+	// Get databases
+	databases := []string{"postgres"}
+	if len(nodes) > 0 && nodes[0].ContainerID != "" {
+		dbCmd := []string{
+			"psql", "-U", "postgres", "-t", "-A", "-c",
+			"SELECT datname FROM pg_database WHERE datistemplate = false;",
+		}
+		output, err := s.dockerSvc.ExecCommand(ctx, nodes[0].ContainerID, dbCmd)
+		if err == nil {
+			databases = strings.Split(strings.TrimSpace(output), "\n")
+		}
+	}
+
+	// Mask password
+	passwordHint := "****" + cluster.Password[len(cluster.Password)-4:]
+	if len(cluster.Password) < 4 {
+		passwordHint = "****"
+	}
+
+	return &dto.ConnectionInfoResponse{
+		ClusterID:   clusterID,
+		ClusterName: infra.Name,
+		Status:      string(infra.Status),
+		Endpoints: dto.ConnectionDetails{
+			HAProxy: dto.HAProxyEndpoint{
+				Host:      "localhost",
+				WritePort: haproxyPort,
+				ReadPort:  haproxyReadPort,
+				StatsPort: haproxyStatsPort,
+				WriteURL:  fmt.Sprintf("postgresql://postgres@localhost:%d/postgres", haproxyPort),
+				ReadURL:   fmt.Sprintf("postgresql://postgres@localhost:%d/postgres", haproxyReadPort),
+				StatsURL:  fmt.Sprintf("http://localhost:%d", haproxyStatsPort),
+			},
+			Primary:  primaryEndpoint,
+			Replicas: replicaEndpoints,
+		},
+		Credentials: dto.CredentialsInfo{
+			Username:     "postgres",
+			PasswordHint: passwordHint,
+			Database:     "postgres",
+		},
+		Databases: databases,
+	}, nil
+}
+
+// GetTables lists all tables in a database
+func (s *postgreSQLClusterService) GetTables(ctx context.Context, clusterID, database string) ([]dto.TableInfo, error) {
+	s.logger.Info("getting tables", zap.String("cluster_id", clusterID), zap.String("database", database))
+
+	cluster, err := s.clusterRepo.FindByID(clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("cluster not found: %w", err)
+	}
+
+	nodesList, err := s.clusterRepo.ListNodes(clusterID)
+	if err != nil || len(nodesList) == 0 {
+		return nil, fmt.Errorf("no nodes available")
+	}
+
+	// Find primary node
+	var targetNode *entities.ClusterNode
+	for i := range nodesList {
+		if nodesList[i].ID == cluster.PrimaryNodeID || nodesList[i].Role == "primary" {
+			targetNode = &nodesList[i]
+			break
+		}
+	}
+	if targetNode == nil {
+		targetNode = &nodesList[0]
+	}
+
+	// Query for tables
+	query := `
+		SELECT 
+			table_name,
+			table_schema,
+			CASE table_type WHEN 'BASE TABLE' THEN 'table' WHEN 'VIEW' THEN 'view' ELSE 'other' END as type
+		FROM information_schema.tables 
+		WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+		ORDER BY table_schema, table_name;
+	`
+
+	cmd := []string{
+		"psql", "-U", "postgres", "-d", database, "-t", "-A", "-F", "|", "-c", query,
+	}
+
+	output, err := s.dockerSvc.ExecCommand(ctx, targetNode.ContainerID, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tables: %w", err)
+	}
+
+	tables := make([]dto.TableInfo, 0)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) >= 3 {
+			tables = append(tables, dto.TableInfo{
+				Name:   parts[0],
+				Schema: parts[1],
+				Type:   parts[2],
+			})
+		}
+	}
+
+	return tables, nil
+}
+
+// GetTableSchema returns schema for a table
+func (s *postgreSQLClusterService) GetTableSchema(ctx context.Context, clusterID, database, table string) (*dto.TableSchemaResponse, error) {
+	s.logger.Info("getting table schema", zap.String("cluster_id", clusterID), zap.String("table", table))
+
+	cluster, err := s.clusterRepo.FindByID(clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("cluster not found: %w", err)
+	}
+
+	nodesList, err := s.clusterRepo.ListNodes(clusterID)
+	if err != nil || len(nodesList) == 0 {
+		return nil, fmt.Errorf("no nodes available")
+	}
+
+	var targetNode *entities.ClusterNode
+	for i := range nodesList {
+		if nodesList[i].ID == cluster.PrimaryNodeID || nodesList[i].Role == "primary" {
+			targetNode = &nodesList[i]
+			break
+		}
+	}
+	if targetNode == nil {
+		targetNode = &nodesList[0]
+	}
+
+	// Get columns
+	columnQuery := fmt.Sprintf(`
+		SELECT 
+			column_name,
+			data_type,
+			is_nullable,
+			COALESCE(column_default, '')
+		FROM information_schema.columns 
+		WHERE table_name = '%s'
+		ORDER BY ordinal_position;
+	`, table)
+
+	cmd := []string{
+		"psql", "-U", "postgres", "-d", database, "-t", "-A", "-F", "|", "-c", columnQuery,
+	}
+
+	output, err := s.dockerSvc.ExecCommand(ctx, targetNode.ContainerID, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	columns := make([]dto.ColumnInfo, 0)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) >= 4 {
+			columns = append(columns, dto.ColumnInfo{
+				Name:         parts[0],
+				DataType:     parts[1],
+				IsNullable:   parts[2] == "YES",
+				DefaultValue: parts[3],
+			})
+		}
+	}
+
+	// Get row count
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s;", table)
+	countCmd := []string{
+		"psql", "-U", "postgres", "-d", database, "-t", "-A", "-c", countQuery,
+	}
+	countOutput, _ := s.dockerSvc.ExecCommand(ctx, targetNode.ContainerID, countCmd)
+	rowCount := int64(0)
+	fmt.Sscanf(strings.TrimSpace(countOutput), "%d", &rowCount)
+
+	return &dto.TableSchemaResponse{
+		TableName: table,
+		Schema:    "public",
+		Columns:   columns,
+		RowCount:  rowCount,
+	}, nil
+}
+
+// GetTableData returns data from a table with pagination
+func (s *postgreSQLClusterService) GetTableData(ctx context.Context, clusterID, database, table, page, limit string) (*dto.QueryResult, error) {
+	s.logger.Info("getting table data", zap.String("cluster_id", clusterID), zap.String("table", table))
+
+	pageNum, _ := strconv.Atoi(page)
+	limitNum, _ := strconv.Atoi(limit)
+	if pageNum < 1 {
+		pageNum = 1
+	}
+	if limitNum < 1 || limitNum > 500 {
+		limitNum = 50
+	}
+	offset := (pageNum - 1) * limitNum
+
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limitNum, offset)
+
+	return s.ExecuteQuery(ctx, clusterID, dto.ExecuteQueryRequest{
+		Query:    query,
+		Database: database,
+	})
 }

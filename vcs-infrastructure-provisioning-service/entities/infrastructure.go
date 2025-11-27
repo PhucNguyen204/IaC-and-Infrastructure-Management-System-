@@ -11,7 +11,10 @@ const (
 	TypePostgreSQLSingle  InfrastructureType = "postgres_single"
 	TypePostgreSQLCluster InfrastructureType = "postgres_cluster"
 	TypeNginx             InfrastructureType = "nginx"
+	TypeNginxCluster      InfrastructureType = "nginx_cluster"
 	TypeDockerService     InfrastructureType = "docker_service"
+	TypeDinD              InfrastructureType = "dind" // Docker-in-Docker
+	InfraTypeK8sCluster   InfrastructureType = "k8s_cluster"
 )
 
 const (
