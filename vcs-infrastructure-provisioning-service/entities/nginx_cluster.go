@@ -77,7 +77,6 @@ func (NginxCluster) TableName() string {
 	return "nginx_clusters"
 }
 
-// NginxNode represents a single Nginx instance in the cluster
 type NginxNode struct {
 	ID           string       `gorm:"primaryKey;type:varchar(36)"`
 	ClusterID    string       `gorm:"type:varchar(36);not null;index"`
@@ -100,7 +99,6 @@ func (NginxNode) TableName() string {
 	return "nginx_nodes"
 }
 
-// NginxClusterUpstream represents backend servers for load balancing in a cluster
 type NginxClusterUpstream struct {
 	ID          string       `gorm:"primaryKey;type:varchar(36)"`
 	ClusterID   string       `gorm:"type:varchar(36);not null;index"`
@@ -117,7 +115,6 @@ func (NginxClusterUpstream) TableName() string {
 	return "nginx_cluster_upstreams"
 }
 
-// NginxUpstreamServer represents a backend server in an upstream
 type NginxUpstreamServer struct {
 	ID          string               `gorm:"primaryKey;type:varchar(36)"`
 	UpstreamID  string               `gorm:"type:varchar(36);not null;index"`
@@ -136,7 +133,6 @@ func (NginxUpstreamServer) TableName() string {
 	return "nginx_upstream_servers"
 }
 
-// NginxServerBlock represents a server block (virtual host)
 type NginxServerBlock struct {
 	ID         string       `gorm:"primaryKey;type:varchar(36)"`
 	ClusterID  string       `gorm:"type:varchar(36);not null;index"`
@@ -155,7 +151,6 @@ func (NginxServerBlock) TableName() string {
 	return "nginx_server_blocks"
 }
 
-// NginxLocation represents a location block within a server block
 type NginxLocation struct {
 	ID            string           `gorm:"primaryKey;type:varchar(36)"`
 	ServerBlockID string           `gorm:"type:varchar(36);not null;index"`
@@ -173,7 +168,6 @@ func (NginxLocation) TableName() string {
 	return "nginx_locations"
 }
 
-// NginxFailoverEvent tracks failover history for an Nginx cluster
 type NginxFailoverEvent struct {
 	ID            string       `gorm:"primaryKey;type:varchar(36)"`
 	ClusterID     string       `gorm:"type:varchar(36);not null;index"`

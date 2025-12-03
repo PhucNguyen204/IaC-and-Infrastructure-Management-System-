@@ -624,14 +624,11 @@ func (s *stackService) deleteResource(ctx context.Context, resourceType, infraID
 }
 
 func (s *stackService) CloneStack(ctx context.Context, userID string, req dto.CloneStackRequest) (*dto.StackInfo, error) {
-	// Get source stack
 	sourceStack, err := s.stackRepo.FindByID(req.SourceStackID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Clone logic: create new stack with same resources but different names
-	// TODO: Implement full clone logic
+	//not implemented yét
 
 	return s.GetStack(ctx, sourceStack.ID)
 }
@@ -668,7 +665,6 @@ func (s *stackService) StartStack(ctx context.Context, stackID string) error {
 func (s *stackService) StopStack(ctx context.Context, stackID string) error {
 	resources, _ := s.stackRepo.FindResourcesByStackID(stackID)
 
-	// Stop in reverse order
 	for i := len(resources) - 1; i >= 0; i-- {
 		res := resources[i]
 		switch res.ResourceType {

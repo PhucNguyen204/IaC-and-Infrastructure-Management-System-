@@ -177,8 +177,7 @@ func (s *postgreSQLClusterService) CreateCluster(ctx context.Context, userID str
 	s.logger.Info("waiting for etcd cluster to be ready", zap.Int("wait_seconds", 15))
 	time.Sleep(15 * time.Second) // Increased wait time for etcd cluster formation
 
-	// Verify etcd cluster health by checking if we can connect
-	// The Patroni entrypoint will also do its own health check
+
 	s.logger.Info("etcd cluster should be ready, proceeding with Patroni node creation")
 
 	// Step 2: Create Patroni nodes
@@ -200,22 +199,18 @@ func (s *postgreSQLClusterService) CreateCluster(ctx context.Context, userID str
 			s.clusterRepo.Update(cluster)
 		}
 
-		// Wait between nodes for replication setup
-		// Longer wait for first replica to ensure primary is fully initialized
+
 		if i < req.NodeCount-1 {
 			if i == 0 {
-				// First replica needs more time to connect to primary
 				s.logger.Info("waiting for primary node to be ready before creating replicas", zap.Int("wait_seconds", 20))
 				time.Sleep(20 * time.Second)
 			} else {
-				// Subsequent replicas can be created faster
 				s.logger.Info("waiting before creating next replica", zap.Int("wait_seconds", 15))
 				time.Sleep(15 * time.Second)
 			}
 		}
 	}
 
-	// Step 3: Create HAProxy load balancer (always enabled for Patroni)
 	s.logger.Info("creating HAProxy load balancer")
 	haproxyNode, err := s.createHAProxyNode(ctx, cluster, req, networkName, patroniNodes)
 	if err != nil {
@@ -259,8 +254,7 @@ func (s *postgreSQLClusterService) createEtcdCluster(ctx context.Context, cluste
 			return nil, fmt.Errorf("failed to create etcd volume: %w", err)
 		}
 
-		// For initial cluster bootstrap, all nodes must use "new" state
-		// Only use "existing" when adding nodes to a running cluster
+
 		initialState := "new"
 
 		// etcd configuration
@@ -505,7 +499,7 @@ func (s *postgreSQLClusterService) createHAProxyNode(ctx context.Context, cluste
 }
 
 // Helper functions and other methods will be copied from backup file...
-// (GetClusterInfo, StartCluster, StopCluster, etc.)
+
 
 func (s *postgreSQLClusterService) updateInfraStatus(infraID string, status entities.InfrastructureStatus) {
 	infra, err := s.infraRepo.FindByID(infraID)
@@ -745,13 +739,11 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		return nil, fmt.Errorf("cluster not found: %w", err)
 	}
 
-	// Get existing nodes to determine next index
 	nodes, err := s.clusterRepo.ListNodes(clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
-	// Count patroni nodes and find max index
 	patroniNodeCount := 0
 	maxIndex := 0
 	var etcdNode *entities.ClusterNode
@@ -762,15 +754,13 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		if node.Role == "primary" || node.Role == "replica" {
 			patroniNodeCount++
 			if existingPatroniNode == nil {
-				nodeCopy := node // Copy to avoid pointer to loop variable
+				nodeCopy := node 
 				existingPatroniNode = &nodeCopy
 			}
-			// Extract index from container name if possible
 			if node.ContainerID != "" {
 				inspect, err := s.dockerSvc.InspectContainer(ctx, node.ContainerID)
 				if err == nil && inspect != nil {
 					networkName = getNetworkNameFromContainer(inspect)
-					// Find node index from name
 					name := inspect.Name
 					if strings.Contains(name, "patroni-node-") {
 						var idx int
@@ -800,8 +790,8 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		return nil, fmt.Errorf("maximum 10 nodes reached")
 	}
 
-	// Create new node with next index
-	newIndex := maxIndex // Will be incremented in createPatroniNode
+
+	newIndex := maxIndex 
 	nodeID := uuid.New().String()
 	nodeName := req.NodeName
 	if nodeName == "" {
@@ -1003,7 +993,6 @@ func (s *postgreSQLClusterService) RemoveNode(ctx context.Context, clusterID str
 		s.dockerSvc.RemoveContainer(ctx, targetNode.ContainerID)
 	}
 
-	// Remove volumes
 	if targetNode.VolumeID != "" {
 		s.dockerSvc.RemoveVolume(ctx, targetNode.VolumeID)
 		// Also try to remove backup volume
@@ -1011,12 +1000,10 @@ func (s *postgreSQLClusterService) RemoveNode(ctx context.Context, clusterID str
 		s.dockerSvc.RemoveVolume(ctx, backupVolume)
 	}
 
-	// Delete from database
 	if err := s.clusterRepo.DeleteNode(req.NodeID); err != nil {
 		return nil, fmt.Errorf("failed to delete node from database: %w", err)
 	}
 
-	// Invalidate cache
 	s.cacheService.InvalidateClusterInfo(ctx, clusterID)
 
 	s.logger.Info("removed node from cluster",
@@ -1103,8 +1090,6 @@ func (s *postgreSQLClusterService) GetClusterLogs(ctx context.Context, clusterID
 
 func (s *postgreSQLClusterService) PromoteReplica(ctx context.Context, clusterID, nodeID string) error {
 	s.logger.Info("manual failover requested", zap.String("cluster_id", clusterID), zap.String("node_id", nodeID))
-
-	// Get current nodes
 	nodes, err := s.clusterRepo.ListNodes(clusterID)
 	if err != nil {
 		return fmt.Errorf("failed to list nodes: %w", err)
@@ -1128,8 +1113,6 @@ func (s *postgreSQLClusterService) PromoteReplica(ctx context.Context, clusterID
 		return fmt.Errorf("node is already primary")
 	}
 
-	// Patroni handles the actual failover - we just record it
-	// In production, you would call Patroni REST API here
 
 	// Record failover event
 	event := &entities.FailoverEvent{
@@ -1163,7 +1146,6 @@ func (s *postgreSQLClusterService) PromoteReplica(ctx context.Context, clusterID
 	return nil
 }
 
-// StopNode stops a specific node in the cluster
 func (s *postgreSQLClusterService) StopNode(ctx context.Context, clusterID, nodeID string) error {
 	s.logger.Info("stopping node", zap.String("cluster_id", clusterID), zap.String("node_id", nodeID))
 
@@ -1450,7 +1432,6 @@ func (s *postgreSQLClusterService) ExecuteQuery(ctx context.Context, clusterID s
 			return nil, fmt.Errorf("node %s not found", req.NodeID)
 		}
 	} else {
-		// Default to primary node
 		for i := range nodes {
 			if nodes[i].Role == "primary" {
 				targetNode = &nodes[i]
@@ -1510,7 +1491,6 @@ func (s *postgreSQLClusterService) ExecuteQuery(ctx context.Context, clusterID s
 	return result, nil
 }
 
-// TestReplication tests data replication across all nodes
 func (s *postgreSQLClusterService) TestReplication(ctx context.Context, clusterID string) (*dto.ReplicationTestResult, error) {
 	s.logger.Info("testing replication on cluster", zap.String("cluster_id", clusterID))
 
@@ -1559,7 +1539,6 @@ func (s *postgreSQLClusterService) TestReplication(ctx context.Context, clusterI
 	testData := fmt.Sprintf("test-%d", time.Now().Unix())
 	testTime := time.Now()
 
-	// Create test table and insert data on primary
 	createCmd := []string{
 		"psql", "-U", "postgres", "-c",
 		fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (id SERIAL PRIMARY KEY, data TEXT, created_at TIMESTAMP DEFAULT NOW());", testTable),
@@ -1651,11 +1630,9 @@ func (s *postgreSQLClusterService) TestReplication(ctx context.Context, clusterI
 
 // extractNodeIndex extracts node number from container ID/name
 func extractNodeIndex(containerID string) int {
-	// This is a helper - in real implementation, you'd query container name
 	return 0
 }
 
-// TestConnection tests database connection to the cluster
 func (s *postgreSQLClusterService) TestConnection(ctx context.Context, clusterID string, req dto.TestConnectionRequest) (*dto.TestConnectionResponse, error) {
 	s.logger.Info("testing connection", zap.String("cluster_id", clusterID))
 
@@ -1730,7 +1707,6 @@ func (s *postgreSQLClusterService) TestConnection(ctx context.Context, clusterID
 	}, nil
 }
 
-// GetConnectionInfo returns detailed connection information
 func (s *postgreSQLClusterService) GetConnectionInfo(ctx context.Context, clusterID string) (*dto.ConnectionInfoResponse, error) {
 	s.logger.Info("getting connection info", zap.String("cluster_id", clusterID))
 
@@ -1974,7 +1950,6 @@ func (s *postgreSQLClusterService) GetTableSchema(ctx context.Context, clusterID
 	}, nil
 }
 
-// GetTableData returns data from a table with pagination
 func (s *postgreSQLClusterService) GetTableData(ctx context.Context, clusterID, database, table, page, limit string) (*dto.QueryResult, error) {
 	s.logger.Info("getting table data", zap.String("cluster_id", clusterID), zap.String("table", table))
 

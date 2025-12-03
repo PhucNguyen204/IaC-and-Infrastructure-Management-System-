@@ -98,3 +98,6 @@ func main() {
 		log.Fatalf("Failed to run service: %v", err)
 	}
 }
+
+
+// curl http://localhost:32793/cluster 2>$null | ConvertFrom-Json | Select-Object -ExpandProperty members | Format-Table name, role, state, lag
