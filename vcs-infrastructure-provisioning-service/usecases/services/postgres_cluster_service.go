@@ -48,17 +48,12 @@ type IPostgreSQLClusterService interface {
 	ListDatabases(ctx context.Context, clusterID string) ([]dto.ClusterDatabaseInfo, error)
 	DeleteDatabase(ctx context.Context, clusterID, dbname string) error
 
-	// Configuration & Endpoints
+	// Configuration
 	UpdateConfig(ctx context.Context, clusterID string, req dto.UpdateConfigRequest) error
-	GetEndpoints(ctx context.Context, clusterID string) (*dto.ClusterInfoResponse, error)
 
 	// Query & Replication Test
 	ExecuteQuery(ctx context.Context, clusterID string, req dto.ExecuteQueryRequest) (*dto.QueryResult, error)
 	TestReplication(ctx context.Context, clusterID string) (*dto.ReplicationTestResult, error)
-
-	// Connection Management
-	TestConnection(ctx context.Context, clusterID string, req dto.TestConnectionRequest) (*dto.TestConnectionResponse, error)
-	GetConnectionInfo(ctx context.Context, clusterID string) (*dto.ConnectionInfoResponse, error)
 
 	// Schema Browser
 	GetTables(ctx context.Context, clusterID, database string) ([]dto.TableInfo, error)
@@ -177,7 +172,6 @@ func (s *postgreSQLClusterService) CreateCluster(ctx context.Context, userID str
 	s.logger.Info("waiting for etcd cluster to be ready", zap.Int("wait_seconds", 15))
 	time.Sleep(15 * time.Second) // Increased wait time for etcd cluster formation
 
-
 	s.logger.Info("etcd cluster should be ready, proceeding with Patroni node creation")
 
 	// Step 2: Create Patroni nodes
@@ -198,7 +192,6 @@ func (s *postgreSQLClusterService) CreateCluster(ctx context.Context, userID str
 			cluster.PrimaryNodeID = node.ID
 			s.clusterRepo.Update(cluster)
 		}
-
 
 		if i < req.NodeCount-1 {
 			if i == 0 {
@@ -236,9 +229,9 @@ func (s *postgreSQLClusterService) createEtcdCluster(ctx context.Context, cluste
 
 	// Build initial cluster string
 	initialCluster := []string{
-		fmt.Sprintf("etcd-1=http://etcd-1:2380"),
-		fmt.Sprintf("etcd-2=http://etcd-2:2380"),
-		fmt.Sprintf("etcd-3=http://etcd-3:2380"),
+		"etcd-1=http://etcd-1:2380",
+		"etcd-2=http://etcd-2:2380",
+		"etcd-3=http://etcd-3:2380",
 	}
 	initialClusterStr := strings.Join(initialCluster, ",")
 
@@ -254,7 +247,6 @@ func (s *postgreSQLClusterService) createEtcdCluster(ctx context.Context, cluste
 			return nil, fmt.Errorf("failed to create etcd volume: %w", err)
 		}
 
-
 		initialState := "new"
 
 		// etcd configuration
@@ -267,9 +259,9 @@ func (s *postgreSQLClusterService) createEtcdCluster(ctx context.Context, cluste
 				fmt.Sprintf("ETCD_INITIAL_CLUSTER_STATE=%s", initialState),
 				fmt.Sprintf("ETCD_INITIAL_CLUSTER=%s", initialClusterStr),
 				fmt.Sprintf("ETCD_INITIAL_ADVERTISE_PEER_URLS=http://%s:2380", nodeName),
-				fmt.Sprintf("ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380"),
+				"ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380",
 				fmt.Sprintf("ETCD_ADVERTISE_CLIENT_URLS=http://%s:2379", nodeName),
-				fmt.Sprintf("ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379"),
+				"ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379",
 			},
 			Ports:        map[string]string{"2379": "0", "2380": "0"},
 			Volumes:      map[string]string{volumeName: "/etcd-data"},
@@ -364,7 +356,7 @@ func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluste
 		fmt.Sprintf("SCOPE=%s", req.ClusterName),
 		fmt.Sprintf("NAMESPACE=%s", req.Namespace),
 		fmt.Sprintf("PATRONI_NAME=%s", nodeName),
-		fmt.Sprintf("ETCD_HOST=etcd-1:2379"),
+		"ETCD_HOST=etcd-1:2379",
 		fmt.Sprintf("POSTGRES_PASSWORD=%s", req.PostgreSQLPassword),
 		"REPLICATION_PASSWORD=replicator_pass",
 		fmt.Sprintf("MAX_CONNECTIONS=%s", maxConnections),
@@ -376,7 +368,7 @@ func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluste
 		fmt.Sprintf("NOLOADBALANCE=%t", req.NoLoadBalance),
 		fmt.Sprintf("CLONEFROM=%t", req.CloneFrom),
 		fmt.Sprintf("NOSYNC=%t", req.NoSync),
-		fmt.Sprintf("PGDATA=/data/patroni"),
+		"PGDATA=/data/patroni",
 	}
 
 	// PgBackRest configuration
@@ -499,7 +491,6 @@ func (s *postgreSQLClusterService) createHAProxyNode(ctx context.Context, cluste
 }
 
 // Helper functions and other methods will be copied from backup file...
-
 
 func (s *postgreSQLClusterService) updateInfraStatus(infraID string, status entities.InfrastructureStatus) {
 	infra, err := s.infraRepo.FindByID(infraID)
@@ -754,7 +745,7 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		if node.Role == "primary" || node.Role == "replica" {
 			patroniNodeCount++
 			if existingPatroniNode == nil {
-				nodeCopy := node 
+				nodeCopy := node
 				existingPatroniNode = &nodeCopy
 			}
 			if node.ContainerID != "" {
@@ -790,8 +781,7 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		return nil, fmt.Errorf("maximum 10 nodes reached")
 	}
 
-
-	newIndex := maxIndex 
+	newIndex := maxIndex
 	nodeID := uuid.New().String()
 	nodeName := req.NodeName
 	if nodeName == "" {
@@ -837,7 +827,7 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		fmt.Sprintf("SCOPE=%s", scope),
 		fmt.Sprintf("NAMESPACE=%s", namespace),
 		fmt.Sprintf("PATRONI_NAME=%s", nodeName),
-		fmt.Sprintf("ETCD_HOST=etcd-1:2379"),
+		"ETCD_HOST=etcd-1:2379",
 		fmt.Sprintf("POSTGRES_PASSWORD=%s", cluster.Password),
 		"REPLICATION_PASSWORD=replicator_pass",
 		"MAX_CONNECTIONS=100",
@@ -1055,6 +1045,7 @@ func (s *postgreSQLClusterService) GetClusterStats(ctx context.Context, clusterI
 
 	response := &dto.ClusterStatsResponse{
 		ClusterID: clusterID,
+		Nodes:     nodeStats,
 	}
 
 	s.cacheService.SetClusterStats(ctx, clusterID, response, 30*time.Second)
@@ -1112,7 +1103,6 @@ func (s *postgreSQLClusterService) PromoteReplica(ctx context.Context, clusterID
 	if newPrimary.Role == "primary" {
 		return fmt.Errorf("node is already primary")
 	}
-
 
 	// Record failover event
 	event := &entities.FailoverEvent{
@@ -1179,9 +1169,9 @@ func (s *postgreSQLClusterService) StopNode(ctx context.Context, clusterID, node
 				ID:             uuid.New().String(),
 				ClusterID:      clusterID,
 				OldPrimaryID:   node.ID,
-				OldPrimaryName: fmt.Sprintf("node-primary"),
+				OldPrimaryName: "node-primary",
 				NewPrimaryID:   candidateReplica.ID,
-				NewPrimaryName: fmt.Sprintf("node-replica"),
+				NewPrimaryName: "node-replica",
 				Reason:         "node_failure",
 				TriggeredBy:    "system",
 			}
@@ -1401,10 +1391,6 @@ func (s *postgreSQLClusterService) DeleteDatabase(ctx context.Context, clusterID
 
 func (s *postgreSQLClusterService) UpdateConfig(ctx context.Context, clusterID string, req dto.UpdateConfigRequest) error {
 	return fmt.Errorf("not yet implemented")
-}
-
-func (s *postgreSQLClusterService) GetEndpoints(ctx context.Context, clusterID string) (*dto.ClusterInfoResponse, error) {
-	return s.GetClusterInfo(ctx, clusterID)
 }
 
 // ExecuteQuery runs a SQL query on the cluster
@@ -1631,178 +1617,6 @@ func (s *postgreSQLClusterService) TestReplication(ctx context.Context, clusterI
 // extractNodeIndex extracts node number from container ID/name
 func extractNodeIndex(containerID string) int {
 	return 0
-}
-
-func (s *postgreSQLClusterService) TestConnection(ctx context.Context, clusterID string, req dto.TestConnectionRequest) (*dto.TestConnectionResponse, error) {
-	s.logger.Info("testing connection", zap.String("cluster_id", clusterID))
-
-	cluster, err := s.clusterRepo.FindByID(clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("cluster not found: %w", err)
-	}
-
-	// Get primary node
-	nodesList, err := s.clusterRepo.ListNodes(clusterID)
-	if err != nil || len(nodesList) == 0 {
-		return nil, fmt.Errorf("no nodes available")
-	}
-
-	// Convert to pointer slice
-	nodes := make([]*entities.ClusterNode, len(nodesList))
-	for i := range nodesList {
-		nodes[i] = &nodesList[i]
-	}
-
-	var primaryNode *entities.ClusterNode
-	for _, node := range nodes {
-		if node.Role == "primary" || node.ID == cluster.PrimaryNodeID {
-			primaryNode = node
-			break
-		}
-	}
-	if primaryNode == nil {
-		primaryNode = nodes[0]
-	}
-
-	// Default values
-	database := "postgres"
-	if req.Database != "" {
-		database = req.Database
-	}
-
-	// Test connection by running a simple query
-	startTime := time.Now()
-	testCmd := []string{
-		"psql", "-U", "postgres", "-d", database, "-t", "-A", "-c",
-		"SELECT version();",
-	}
-
-	output, err := s.dockerSvc.ExecCommand(ctx, primaryNode.ContainerID, testCmd)
-	latency := time.Since(startTime)
-
-	if err != nil {
-		return &dto.TestConnectionResponse{
-			Success: false,
-			Message: fmt.Sprintf("Connection failed: %v", err),
-			Latency: latency.String(),
-		}, nil
-	}
-
-	// Get node role
-	nodeRole := "primary"
-	roleCmd := []string{"curl", "-s", "http://localhost:8008"}
-	roleOutput, _ := s.dockerSvc.ExecCommand(ctx, primaryNode.ContainerID, roleCmd)
-	if strings.Contains(roleOutput, `"role": "replica"`) {
-		nodeRole = "replica"
-	}
-
-	return &dto.TestConnectionResponse{
-		Success:       true,
-		Message:       "Connection successful",
-		Latency:       latency.String(),
-		ServerVersion: strings.TrimSpace(output),
-		NodeName:      primaryNode.Role,
-		NodeRole:      nodeRole,
-		ConnectionURL: fmt.Sprintf("postgresql://postgres@localhost:%d/%s", primaryNode.Port, database),
-	}, nil
-}
-
-func (s *postgreSQLClusterService) GetConnectionInfo(ctx context.Context, clusterID string) (*dto.ConnectionInfoResponse, error) {
-	s.logger.Info("getting connection info", zap.String("cluster_id", clusterID))
-
-	cluster, err := s.clusterRepo.FindByID(clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("cluster not found: %w", err)
-	}
-
-	infra, err := s.infraRepo.FindByID(cluster.InfrastructureID)
-	if err != nil {
-		return nil, fmt.Errorf("infrastructure not found: %w", err)
-	}
-
-	nodesList, err := s.clusterRepo.ListNodes(clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get nodes: %w", err)
-	}
-
-	// Convert to pointer slice
-	nodes := make([]*entities.ClusterNode, len(nodesList))
-	for i := range nodesList {
-		nodes[i] = &nodesList[i]
-	}
-
-	// Build endpoints
-	var primaryEndpoint dto.DirectEndpoint
-	replicaEndpoints := make([]dto.DirectEndpoint, 0)
-
-	for _, node := range nodes {
-		endpoint := dto.DirectEndpoint{
-			NodeID:        node.ID,
-			NodeName:      node.Role,
-			Role:          node.Role,
-			Host:          "localhost",
-			Port:          node.Port,
-			ConnectionURL: fmt.Sprintf("postgresql://postgres@localhost:%d/postgres", node.Port),
-			IsHealthy:     node.IsHealthy,
-		}
-
-		if node.Role == "primary" || node.ID == cluster.PrimaryNodeID {
-			endpoint.Role = "primary"
-			primaryEndpoint = endpoint
-		} else {
-			endpoint.Role = "replica"
-			replicaEndpoints = append(replicaEndpoints, endpoint)
-		}
-	}
-
-	// HAProxy endpoints (if available)
-	haproxyPort := 5000
-	haproxyReadPort := 5001
-	haproxyStatsPort := 7000
-
-	// Get databases
-	databases := []string{"postgres"}
-	if len(nodes) > 0 && nodes[0].ContainerID != "" {
-		dbCmd := []string{
-			"psql", "-U", "postgres", "-t", "-A", "-c",
-			"SELECT datname FROM pg_database WHERE datistemplate = false;",
-		}
-		output, err := s.dockerSvc.ExecCommand(ctx, nodes[0].ContainerID, dbCmd)
-		if err == nil {
-			databases = strings.Split(strings.TrimSpace(output), "\n")
-		}
-	}
-
-	// Mask password
-	passwordHint := "****" + cluster.Password[len(cluster.Password)-4:]
-	if len(cluster.Password) < 4 {
-		passwordHint = "****"
-	}
-
-	return &dto.ConnectionInfoResponse{
-		ClusterID:   clusterID,
-		ClusterName: infra.Name,
-		Status:      string(infra.Status),
-		Endpoints: dto.ConnectionDetails{
-			HAProxy: dto.HAProxyEndpoint{
-				Host:      "localhost",
-				WritePort: haproxyPort,
-				ReadPort:  haproxyReadPort,
-				StatsPort: haproxyStatsPort,
-				WriteURL:  fmt.Sprintf("postgresql://postgres@localhost:%d/postgres", haproxyPort),
-				ReadURL:   fmt.Sprintf("postgresql://postgres@localhost:%d/postgres", haproxyReadPort),
-				StatsURL:  fmt.Sprintf("http://localhost:%d", haproxyStatsPort),
-			},
-			Primary:  primaryEndpoint,
-			Replicas: replicaEndpoints,
-		},
-		Credentials: dto.CredentialsInfo{
-			Username:     "postgres",
-			PasswordHint: passwordHint,
-			Database:     "postgres",
-		},
-		Databases: databases,
-	}, nil
 }
 
 // GetTables lists all tables in a database

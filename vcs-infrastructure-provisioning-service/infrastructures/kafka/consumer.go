@@ -21,32 +21,54 @@ type IEventConsumer interface {
 }
 
 type eventConsumer struct {
-	reader *kafka.Reader
-	cache  CacheInvalidator
-	logger logger.ILogger
+	reader  *kafka.Reader
+	cache   CacheInvalidator
+	logger  logger.ILogger
+	enabled bool
 }
 
 func NewEventConsumer(env env.KafkaEnv, cache CacheInvalidator, logger logger.ILogger) IEventConsumer {
+	// Check if Kafka is configured
+	if len(env.Brokers) == 0 || env.Brokers[0] == "" {
+		logger.Warn("Kafka not configured, consumer disabled")
+		return &eventConsumer{
+			reader:  nil,
+			cache:   cache,
+			logger:  logger,
+			enabled: false,
+		}
+	}
+
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  env.Brokers,
-		Topic:    env.Topic,
-		GroupID:  "infrastructure-processor",
-		MinBytes: 10e3,
-		MaxBytes: 10e6,
-		MaxWait:  500 * time.Millisecond,
+		Brokers:        env.Brokers,
+		Topic:          env.Topic,
+		GroupID:        "infrastructure-processor",
+		MinBytes:       10e3,
+		MaxBytes:       10e6,
+		MaxWait:        500 * time.Millisecond,
+		CommitInterval: time.Second,
 	})
 
 	return &eventConsumer{
-		reader: reader,
-		cache:  cache,
-		logger: logger,
+		reader:  reader,
+		cache:   cache,
+		logger:  logger,
+		enabled: true,
 	}
 }
 
 func (c *eventConsumer) Start(ctx context.Context) error {
+	if !c.enabled || c.reader == nil {
+		c.logger.Info("Kafka consumer disabled, skipping start")
+		return nil
+	}
+
 	c.logger.Info("starting kafka consumer", zap.String("group", "infrastructure-processor"))
 
 	go func() {
+		retryDelay := time.Second
+		maxRetryDelay := 30 * time.Second
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -54,9 +76,20 @@ func (c *eventConsumer) Start(ctx context.Context) error {
 			default:
 				msg, err := c.reader.ReadMessage(ctx)
 				if err != nil {
-					c.logger.Error("failed to read message", zap.Error(err))
+					if ctx.Err() != nil {
+						return // Context cancelled, exit gracefully
+					}
+					c.logger.Warn("failed to read message, retrying...",
+						zap.Error(err),
+						zap.Duration("retry_delay", retryDelay))
+
+					time.Sleep(retryDelay)
+					retryDelay = min(retryDelay*2, maxRetryDelay)
 					continue
 				}
+
+				// Reset retry delay on successful read
+				retryDelay = time.Second
 
 				var event InfrastructureEvent
 				if err := json.Unmarshal(msg.Value, &event); err != nil {
@@ -101,6 +134,9 @@ func (c *eventConsumer) handleEvent(ctx context.Context, event InfrastructureEve
 }
 
 func (c *eventConsumer) Close() error {
-	c.logger.Info("closing kafka consumer")
-	return c.reader.Close()
+	if c.reader != nil {
+		c.logger.Info("closing kafka consumer")
+		return c.reader.Close()
+	}
+	return nil
 }

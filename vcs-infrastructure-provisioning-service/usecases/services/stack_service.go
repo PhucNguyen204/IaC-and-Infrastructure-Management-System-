@@ -34,12 +34,8 @@ type IStackService interface {
 type stackService struct {
 	stackRepo           repositories.IStackRepository
 	infraRepo           repositories.IInfrastructureRepository
-	nginxService        INginxService
-	pgService           IPostgreSQLService
 	clusterService      IPostgreSQLClusterService
 	clusterRepo         repositories.IPostgreSQLClusterRepository
-	pgDbService         IPostgresDatabaseService
-	dockerService       IDockerServiceService
 	nginxClusterService INginxClusterService
 	nginxClusterRepo    repositories.INginxClusterRepository
 	dindService         IDinDService
@@ -48,12 +44,8 @@ type stackService struct {
 func NewStackService(
 	stackRepo repositories.IStackRepository,
 	infraRepo repositories.IInfrastructureRepository,
-	nginxService INginxService,
-	pgService IPostgreSQLService,
 	clusterService IPostgreSQLClusterService,
 	clusterRepo repositories.IPostgreSQLClusterRepository,
-	pgDbService IPostgresDatabaseService,
-	dockerService IDockerServiceService,
 	nginxClusterService INginxClusterService,
 	nginxClusterRepo repositories.INginxClusterRepository,
 	dindService IDinDService,
@@ -61,12 +53,8 @@ func NewStackService(
 	return &stackService{
 		stackRepo:           stackRepo,
 		infraRepo:           infraRepo,
-		nginxService:        nginxService,
-		pgService:           pgService,
 		clusterService:      clusterService,
 		clusterRepo:         clusterRepo,
-		pgDbService:         pgDbService,
-		dockerService:       dockerService,
 		nginxClusterService: nginxClusterService,
 		nginxClusterRepo:    nginxClusterRepo,
 		dindService:         dindService,
@@ -156,79 +144,6 @@ func (s *stackService) createResource(ctx context.Context, userID, stackID strin
 	specJSON, _ := json.Marshal(resInput.Spec)
 
 	switch resInput.Type {
-	case "NGINX_GATEWAY":
-		var nginxReq dto.CreateNginxRequest
-		if err := json.Unmarshal(specJSON, &nginxReq); err != nil {
-			return "", err
-		}
-		nginxReq.Name = resInput.Name
-
-		// Set defaults if not specified
-		if nginxReq.Port == 0 {
-			nginxReq.Port = 8080
-		}
-		if nginxReq.Config == "" {
-			nginxReq.Config = "default"
-		}
-
-		resp, err := s.nginxService.CreateNginx(ctx, userID, nginxReq)
-		if err != nil {
-			return "", err
-		}
-		return resp.ID, nil
-
-	case "POSTGRES_INSTANCE":
-		var pgReq dto.CreatePostgreSQLRequest
-		if err := json.Unmarshal(specJSON, &pgReq); err != nil {
-			return "", err
-		}
-		pgReq.Name = resInput.Name
-
-		// Set defaults if not specified
-		if pgReq.Version == "" {
-			pgReq.Version = "16-alpine"
-		}
-		if pgReq.Port == 0 {
-			// Use random port in range 15432-25432 to avoid conflicts
-			pgReq.Port = 15432 + int(uuid.New().ID()%10000)
-		}
-		if pgReq.DatabaseName == "" {
-			pgReq.DatabaseName = "app"
-		}
-		if pgReq.Username == "" {
-			pgReq.Username = "postgres"
-		}
-		if pgReq.Password == "" {
-			pgReq.Password = "postgres123"
-		}
-
-		resp, err := s.pgService.CreatePostgreSQL(ctx, userID, pgReq)
-		if err != nil {
-			return "", err
-		}
-		return resp.ID, nil
-
-	case "POSTGRES_DATABASE":
-		var dbReq dto.CreateDatabaseRequest
-		if err := json.Unmarshal(specJSON, &dbReq); err != nil {
-			return "", err
-		}
-		dbReq.DBName = resInput.Name
-
-		// Resolve instance_id from dependencies
-		var instanceID string
-		if len(resInput.DependsOn) > 0 {
-			if id, ok := resourceMap[resInput.DependsOn[0]]; ok {
-				instanceID = id
-			}
-		}
-
-		resp, err := s.pgDbService.CreateDatabase(ctx, instanceID, dbReq)
-		if err != nil {
-			return "", err
-		}
-		return resp.ID, nil
-
 	case "POSTGRES_CLUSTER":
 		var clusterReq dto.CreateClusterRequest
 		if err := json.Unmarshal(specJSON, &clusterReq); err != nil {
@@ -260,44 +175,6 @@ func (s *stackService) createResource(ctx context.Context, userID, stackID strin
 		}
 
 		resp, err := s.clusterService.CreateCluster(ctx, userID, clusterReq)
-		if err != nil {
-			return "", err
-		}
-		return resp.InfrastructureID, nil
-
-	case "DOCKER_SERVICE":
-		var dockerReq dto.CreateDockerServiceRequest
-		if err := json.Unmarshal(specJSON, &dockerReq); err != nil {
-			return "", err
-		}
-		dockerReq.Name = resInput.Name
-
-		// Resolve dependencies for env vars (e.g., database connection strings)
-		if len(resInput.DependsOn) > 0 {
-			for _, depName := range resInput.DependsOn {
-				if depID, ok := resourceMap[depName]; ok {
-					// Get infrastructure to inject connection info
-					infra, _ := s.infraRepo.FindByID(depID)
-					if infra != nil && infra.Type == entities.TypePostgreSQLSingle {
-						pgInstance, _ := s.pgService.GetPostgreSQLInfo(ctx, depID)
-						if pgInstance != nil {
-							dockerReq.EnvVars = append(dockerReq.EnvVars, dto.EnvVarInput{
-								Key:      "DATABASE_HOST",
-								Value:    pgInstance.Name,
-								IsSecret: false,
-							})
-							dockerReq.EnvVars = append(dockerReq.EnvVars, dto.EnvVarInput{
-								Key:      "DATABASE_PORT",
-								Value:    fmt.Sprintf("%d", pgInstance.Port),
-								IsSecret: false,
-							})
-						}
-					}
-				}
-			}
-		}
-
-		resp, err := s.dockerService.CreateDockerService(ctx, userID, dockerReq)
 		if err != nil {
 			return "", err
 		}
@@ -418,19 +295,6 @@ func (s *stackService) getResourceOutputs(ctx context.Context, resourceType, inf
 	outputs := make(map[string]interface{})
 
 	switch resourceType {
-	case "NGINX_GATEWAY":
-		if nginx, err := s.nginxService.GetNginxInfo(ctx, infraID); err == nil {
-			outputs["nginx_name"] = nginx.Name
-			outputs["port"] = nginx.Port
-			outputs["status"] = nginx.Status
-		}
-	case "POSTGRES_INSTANCE":
-		if pg, err := s.pgService.GetPostgreSQLInfo(ctx, infraID); err == nil {
-			outputs["connection_string"] = fmt.Sprintf("postgresql://%s:%s@%s:%d/%s",
-				pg.Username, "****", pg.Name, pg.Port, pg.DatabaseName)
-			outputs["host"] = pg.Name
-			outputs["port"] = pg.Port
-		}
 	case "POSTGRES_CLUSTER":
 		// Get cluster by infrastructure_id first, then get cluster info by cluster_id
 		if clusterEntity, err := s.clusterRepo.FindByInfrastructureID(infraID); err == nil {
@@ -459,11 +323,6 @@ func (s *stackService) getResourceOutputs(ctx context.Context, resourceType, inf
 				outputs["replica_nodes"] = replicaCount
 				outputs["healthy_nodes"] = healthyCount
 			}
-		}
-	case "DOCKER_SERVICE":
-		if docker, err := s.dockerService.GetDockerService(ctx, infraID); err == nil {
-			outputs["service_name"] = docker.Name
-			outputs["status"] = docker.Status
 		}
 	case "NGINX_CLUSTER":
 		if clusterEntity, err := s.nginxClusterRepo.FindByInfrastructureID(infraID); err == nil {
@@ -594,18 +453,12 @@ func (s *stackService) DeleteStack(ctx context.Context, stackID string) error {
 
 func (s *stackService) deleteResource(ctx context.Context, resourceType, infraID string) error {
 	switch resourceType {
-	case "NGINX_GATEWAY":
-		return s.nginxService.DeleteNginx(ctx, infraID)
-	case "POSTGRES_INSTANCE":
-		return s.pgService.DeletePostgreSQL(ctx, infraID)
 	case "POSTGRES_CLUSTER":
 		clusterID, err := s.getPostgresClusterIDByInfra(infraID)
 		if err != nil {
 			return err
 		}
 		return s.clusterService.DeleteCluster(ctx, clusterID)
-	case "DOCKER_SERVICE":
-		return s.dockerService.DeleteDockerService(ctx, infraID)
 	case "NGINX_CLUSTER":
 		clusterID, err := s.getNginxClusterIDByInfra(infraID)
 		if err != nil {
@@ -638,16 +491,10 @@ func (s *stackService) StartStack(ctx context.Context, stackID string) error {
 
 	for _, res := range resources {
 		switch res.ResourceType {
-		case "POSTGRES_INSTANCE":
-			s.pgService.StartPostgreSQL(ctx, res.InfrastructureID)
 		case "POSTGRES_CLUSTER":
 			if clusterID, err := s.getPostgresClusterIDByInfra(res.InfrastructureID); err == nil {
 				s.clusterService.StartCluster(ctx, clusterID)
 			}
-		case "DOCKER_SERVICE":
-			s.dockerService.StartDockerService(ctx, res.InfrastructureID)
-		case "NGINX_GATEWAY":
-			s.nginxService.StartNginx(ctx, res.InfrastructureID)
 		case "NGINX_CLUSTER":
 			if clusterID, err := s.getNginxClusterIDByInfra(res.InfrastructureID); err == nil {
 				s.nginxClusterService.StartCluster(ctx, clusterID)
@@ -668,20 +515,14 @@ func (s *stackService) StopStack(ctx context.Context, stackID string) error {
 	for i := len(resources) - 1; i >= 0; i-- {
 		res := resources[i]
 		switch res.ResourceType {
-		case "NGINX_GATEWAY":
-			s.nginxService.StopNginx(ctx, res.InfrastructureID)
 		case "NGINX_CLUSTER":
 			if clusterID, err := s.getNginxClusterIDByInfra(res.InfrastructureID); err == nil {
 				s.nginxClusterService.StopCluster(ctx, clusterID)
 			}
-		case "DOCKER_SERVICE":
-			s.dockerService.StopDockerService(ctx, res.InfrastructureID)
 		case "POSTGRES_CLUSTER":
 			if clusterID, err := s.getPostgresClusterIDByInfra(res.InfrastructureID); err == nil {
 				s.clusterService.StopCluster(ctx, clusterID)
 			}
-		case "POSTGRES_INSTANCE":
-			s.pgService.StopPostgreSQL(ctx, res.InfrastructureID)
 		case "DIND_ENVIRONMENT":
 			if dindEnv, err := s.dindService.GetEnvironmentByInfraID(ctx, res.InfrastructureID); err == nil {
 				s.dindService.StopEnvironment(ctx, dindEnv.ID)

@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
+	"net"
+
 	"github.com/google/uuid"
 	"go.uber.org/zap"
-	"net"
 
 	"github.com/PhucNguyen204/vcs-infrastructure-provisioning-service/dto"
 	"github.com/PhucNguyen204/vcs-infrastructure-provisioning-service/entities"
@@ -19,7 +19,6 @@ import (
 	"github.com/PhucNguyen204/vcs-infrastructure-provisioning-service/pkg/logger"
 	"github.com/PhucNguyen204/vcs-infrastructure-provisioning-service/usecases/repositories"
 )
-
 
 // INginxClusterService interface for Nginx cluster operations
 type INginxClusterService interface {
@@ -33,11 +32,9 @@ type INginxClusterService interface {
 	// Node operations
 	AddNode(ctx context.Context, clusterID string, req dto.AddNginxNodeRequest) (*dto.NginxNodeInfo, error)
 	RemoveNode(ctx context.Context, clusterID, nodeID string) error
-	GetNodeInfo(ctx context.Context, nodeID string) (*dto.NginxNodeInfo, error)
 
 	// Configuration
 	UpdateClusterConfig(ctx context.Context, clusterID string, req dto.UpdateNginxClusterConfigRequest) error
-	SyncConfig(ctx context.Context, clusterID string) error
 
 	// Upstreams
 	AddUpstream(ctx context.Context, clusterID string, req dto.AddNginxUpstreamRequest) error
@@ -53,8 +50,6 @@ type INginxClusterService interface {
 	// Health & Monitoring
 	GetClusterHealth(ctx context.Context, clusterID string) (*dto.NginxClusterHealthResponse, error)
 	GetClusterMetrics(ctx context.Context, clusterID string) (*dto.NginxClusterMetricsResponse, error)
-	TestConnection(ctx context.Context, clusterID string) (*dto.TestNginxConnectionResponse, error)
-	GetConnectionInfo(ctx context.Context, clusterID string) (*dto.NginxConnectionInfoResponse, error)
 
 	// Failover
 	TriggerFailover(ctx context.Context, clusterID string, req dto.TriggerNginxFailoverRequest) (*dto.NginxFailoverResponse, error)
@@ -416,7 +411,7 @@ func (s *nginxClusterService) GetClusterInfo(ctx context.Context, clusterID stri
 	}
 
 	// Update cluster status based on nodes
-	clusterStatus := string(infra.Status)
+	var clusterStatus string
 	if runningCount == 0 {
 		clusterStatus = "stopped"
 	} else if runningCount < len(nodes) {
@@ -616,28 +611,6 @@ func (s *nginxClusterService) RemoveNode(ctx context.Context, clusterID, nodeID 
 	return nil
 }
 
-// GetNodeInfo retrieves node information
-func (s *nginxClusterService) GetNodeInfo(ctx context.Context, nodeID string) (*dto.NginxNodeInfo, error) {
-	node, err := s.clusterRepo.FindNodeByID(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("node not found: %w", err)
-	}
-
-	return &dto.NginxNodeInfo{
-		ID:          node.ID,
-		Name:        node.Name,
-		Role:        node.Role,
-		Priority:    node.Priority,
-		Status:      node.Status,
-		ContainerID: node.ContainerID,
-		IPAddress:   node.IPAddress,
-		HTTPPort:    node.HTTPPort,
-		HTTPSPort:   node.HTTPSPort,
-		IsHealthy:   node.IsHealthy,
-		IsMaster:    node.Role == "master",
-	}, nil
-}
-
 // UpdateClusterConfig updates nginx configuration on all nodes
 func (s *nginxClusterService) UpdateClusterConfig(ctx context.Context, clusterID string, req dto.UpdateNginxClusterConfigRequest) error {
 	cluster, err := s.clusterRepo.FindByID(clusterID)
@@ -649,14 +622,13 @@ func (s *nginxClusterService) UpdateClusterConfig(ctx context.Context, clusterID
 	s.clusterRepo.Update(cluster)
 
 	if req.ReloadAll {
-		return s.SyncConfig(ctx, clusterID)
+		return s.syncConfig(ctx, clusterID)
 	}
 	return nil
 }
 
-// SyncConfig synchronizes configuration to all nodes following NGINX best practices
-// Reference: https://docs.nginx.com/nginx/admin-guide/high-availability/configuration-sharing/
-func (s *nginxClusterService) SyncConfig(ctx context.Context, clusterID string) error {
+// syncConfig synchronizes configuration to all nodes following NGINX best practices
+func (s *nginxClusterService) syncConfig(ctx context.Context, clusterID string) error {
 	cluster, err := s.clusterRepo.FindByID(clusterID)
 	if err != nil {
 		return fmt.Errorf("cluster not found: %w", err)
@@ -804,7 +776,7 @@ func (s *nginxClusterService) generateAndApplyConfig(ctx context.Context, cluste
 	cluster.NginxConfig = config
 	s.clusterRepo.Update(cluster)
 
-	return s.SyncConfig(ctx, cluster.ID)
+	return s.syncConfig(ctx, cluster.ID)
 }
 
 // generateNginxConfig generates nginx configuration from cluster settings
@@ -1034,13 +1006,7 @@ func (s *nginxClusterService) createServerBlock(ctx context.Context, clusterID s
 
 // AddUpstream adds an upstream to the cluster
 func (s *nginxClusterService) AddUpstream(ctx context.Context, clusterID string, req dto.AddNginxUpstreamRequest) error {
-	return s.createUpstream(ctx, clusterID, dto.CreateUpstreamRequest{
-		Name:        req.Name,
-		Algorithm:   req.Algorithm,
-		Servers:     req.Servers,
-		HealthCheck: req.HealthCheck,
-		HealthPath:  req.HealthPath,
-	})
+	return s.createUpstream(ctx, clusterID, dto.CreateUpstreamRequest(req))
 }
 
 // UpdateUpstream updates an upstream
@@ -1112,13 +1078,7 @@ func (s *nginxClusterService) ListUpstreams(ctx context.Context, clusterID strin
 
 // AddServerBlock adds a server block
 func (s *nginxClusterService) AddServerBlock(ctx context.Context, clusterID string, req dto.AddNginxServerBlockRequest) error {
-	return s.createServerBlock(ctx, clusterID, dto.CreateServerBlockRequest{
-		ServerName: req.ServerName,
-		ListenPort: req.ListenPort,
-		SSLEnabled: req.SSLEnabled,
-		RootPath:   req.RootPath,
-		Locations:  req.Locations,
-	})
+	return s.createServerBlock(ctx, clusterID, dto.CreateServerBlockRequest(req))
 }
 
 // DeleteServerBlock deletes a server block
@@ -1263,112 +1223,6 @@ func (s *nginxClusterService) getNginxMetrics(ctx context.Context, node *entitie
 	}
 }
 
-// TestConnection tests connection to the cluster
-func (s *nginxClusterService) TestConnection(ctx context.Context, clusterID string) (*dto.TestNginxConnectionResponse, error) {
-	cluster, err := s.clusterRepo.FindByID(clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("cluster not found: %w", err)
-	}
-
-	masterNode, err := s.clusterRepo.FindNodeByID(cluster.MasterNodeID)
-	if err != nil {
-		return nil, fmt.Errorf("master node not found: %w", err)
-	}
-
-	// Test HTTP connection
-	url := fmt.Sprintf("http://localhost:%d/health", masterNode.HTTPPort)
-	start := time.Now()
-	resp, err := http.Get(url)
-	latency := time.Since(start)
-
-	if err != nil {
-		return &dto.TestNginxConnectionResponse{
-			Success:  false,
-			Message:  fmt.Sprintf("Connection failed: %v", err),
-			NodeName: masterNode.Name,
-			NodeRole: masterNode.Role,
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	return &dto.TestNginxConnectionResponse{
-		Success:    true,
-		Message:    "Connection successful",
-		Latency:    latency.String(),
-		NodeName:   masterNode.Name,
-		NodeRole:   masterNode.Role,
-		StatusCode: resp.StatusCode,
-	}, nil
-}
-
-// GetConnectionInfo returns connection information
-func (s *nginxClusterService) GetConnectionInfo(ctx context.Context, clusterID string) (*dto.NginxConnectionInfoResponse, error) {
-	cluster, err := s.clusterRepo.FindByID(clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("cluster not found: %w", err)
-	}
-
-	infra, _ := s.infraRepo.FindByID(cluster.InfrastructureID)
-	nodes, _ := s.clusterRepo.ListNodes(clusterID)
-
-	var masterEndpoint dto.NodeEndpoint
-	backupEndpoints := make([]dto.NodeEndpoint, 0)
-
-	for _, node := range nodes {
-		endpoint := dto.NodeEndpoint{
-			NodeID:    node.ID,
-			NodeName:  node.Name,
-			Role:      node.Role,
-			IP:        "localhost",
-			HTTPPort:  node.HTTPPort,
-			HTTPSPort: node.HTTPSPort,
-			HTTPURL:   fmt.Sprintf("http://localhost:%d", node.HTTPPort),
-			IsHealthy: node.IsHealthy,
-		}
-		if node.HTTPSPort > 0 {
-			endpoint.HTTPSURL = fmt.Sprintf("https://localhost:%d", node.HTTPSPort)
-		}
-
-		if node.ID == cluster.MasterNodeID {
-			masterEndpoint = endpoint
-		} else {
-			backupEndpoints = append(backupEndpoints, endpoint)
-		}
-	}
-
-	// Get server names
-	serverBlocks, _ := s.clusterRepo.ListServerBlocks(clusterID)
-	serverNames := make([]string, 0)
-	for _, block := range serverBlocks {
-		serverNames = append(serverNames, block.ServerName)
-	}
-
-	endpoints := dto.NginxConnectionEndpoints{
-		MasterNode:  masterEndpoint,
-		BackupNodes: backupEndpoints,
-	}
-
-	if cluster.VirtualIP != "" {
-		endpoints.VirtualIP = &dto.VIPEndpoint{
-			IP:       cluster.VirtualIP,
-			HTTPPort: cluster.HTTPPort,
-			HTTPURL:  fmt.Sprintf("http://%s:%d", cluster.VirtualIP, cluster.HTTPPort),
-		}
-		if cluster.HTTPSPort > 0 {
-			endpoints.VirtualIP.HTTPSPort = cluster.HTTPSPort
-			endpoints.VirtualIP.HTTPSURL = fmt.Sprintf("https://%s:%d", cluster.VirtualIP, cluster.HTTPSPort)
-		}
-	}
-
-	return &dto.NginxConnectionInfoResponse{
-		ClusterID:   clusterID,
-		ClusterName: cluster.ClusterName,
-		Status:      string(infra.Status),
-		Endpoints:   endpoints,
-		ServerNames: serverNames,
-	}, nil
-}
-
 // TriggerFailover manually triggers failover to a specified node
 func (s *nginxClusterService) TriggerFailover(ctx context.Context, clusterID string, req dto.TriggerNginxFailoverRequest) (*dto.NginxFailoverResponse, error) {
 	cluster, err := s.clusterRepo.FindByID(clusterID)
@@ -1462,7 +1316,6 @@ func (s *nginxClusterService) updateInfraStatus(infraID string, status entities.
 	}
 }
 
-
 // helper func() to cleanup resources
 func (s *nginxClusterService) cleanup(ctx context.Context, cluster *entities.NginxCluster, networkID string) {
 	nodes, _ := s.clusterRepo.ListNodes(cluster.ID)
@@ -1479,7 +1332,6 @@ func (s *nginxClusterService) cleanup(ctx context.Context, cluster *entities.Ngi
 	s.clusterRepo.Delete(cluster.ID)
 	s.infraRepo.Delete(cluster.InfrastructureID)
 }
-
 
 // helper func() to publish events to Kafka
 func (s *nginxClusterService) publishEvent(ctx context.Context, eventType, infraID, clusterID, status string) {

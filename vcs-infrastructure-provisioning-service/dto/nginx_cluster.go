@@ -163,6 +163,24 @@ type LocationInfo struct {
 	RateLimit    int               `json:"rate_limit"`
 }
 
+// UpstreamInfo represents upstream backend information
+type UpstreamInfo struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Policy   string          `json:"policy"` // round_robin, least_conn, ip_hash
+	Backends []BackendServer `json:"backends"`
+}
+
+// BackendServer represents a backend server in upstream
+type BackendServer struct {
+	Address     string `json:"address"`
+	Port        int    `json:"port,omitempty"`
+	Weight      int    `json:"weight,omitempty"`
+	MaxFails    int    `json:"max_fails,omitempty"`
+	FailTimeout string `json:"fail_timeout,omitempty"`
+	IsBackup    bool   `json:"is_backup,omitempty"`
+}
+
 // ================== Cluster Operations ==================
 
 // AddNginxNodeRequest add a new node to cluster
@@ -308,55 +326,4 @@ type NginxNodeMetrics struct {
 	Status2xx      int64   `json:"status_2xx"`
 	Status4xx      int64   `json:"status_4xx"`
 	Status5xx      int64   `json:"status_5xx"`
-}
-
-// ================== Connection Info ==================
-
-// NginxConnectionInfoResponse connection details for users
-type NginxConnectionInfoResponse struct {
-	ClusterID   string                   `json:"cluster_id"`
-	ClusterName string                   `json:"cluster_name"`
-	Status      string                   `json:"status"`
-	Endpoints   NginxConnectionEndpoints `json:"endpoints"`
-	ServerNames []string                 `json:"server_names"`
-}
-
-// NginxConnectionEndpoints all available endpoints
-type NginxConnectionEndpoints struct {
-	VirtualIP   *VIPEndpoint   `json:"virtual_ip,omitempty"`
-	MasterNode  NodeEndpoint   `json:"master_node"`
-	BackupNodes []NodeEndpoint `json:"backup_nodes,omitempty"`
-}
-
-// VIPEndpoint Virtual IP endpoint
-type VIPEndpoint struct {
-	IP        string `json:"ip"`
-	HTTPPort  int    `json:"http_port"`
-	HTTPSPort int    `json:"https_port,omitempty"`
-	HTTPURL   string `json:"http_url"`
-	HTTPSURL  string `json:"https_url,omitempty"`
-}
-
-// NodeEndpoint individual node endpoint
-type NodeEndpoint struct {
-	NodeID    string `json:"node_id"`
-	NodeName  string `json:"node_name"`
-	Role      string `json:"role"`
-	IP        string `json:"ip"`
-	HTTPPort  int    `json:"http_port"`
-	HTTPSPort int    `json:"https_port,omitempty"`
-	HTTPURL   string `json:"http_url"`
-	HTTPSURL  string `json:"https_url,omitempty"`
-	IsHealthy bool   `json:"is_healthy"`
-}
-
-// TestNginxConnectionResponse test connection result
-type TestNginxConnectionResponse struct {
-	Success      bool   `json:"success"`
-	Message      string `json:"message"`
-	Latency      string `json:"latency"`
-	NodeName     string `json:"node_name"`
-	NodeRole     string `json:"node_role"`
-	NginxVersion string `json:"nginx_version,omitempty"`
-	StatusCode   int    `json:"status_code"`
 }

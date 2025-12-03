@@ -19,17 +19,36 @@ type ICacheService interface {
 	SetReplicationStatus(ctx context.Context, clusterID string, status *dto.ReplicationStatusResponse, ttl time.Duration) error
 	InvalidateCluster(ctx context.Context, clusterID string) error
 	InvalidateClusterInfo(ctx context.Context, clusterID string) error
+	IsAvailable() bool
 }
 
 type cacheService struct {
-	redis *redis.Client
+	redis   *redis.Client
+	enabled bool
 }
 
 func NewCacheService(redis *redis.Client) ICacheService {
-	return &cacheService{redis: redis}
+	enabled := redis != nil
+	if enabled {
+		// Test connection
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := redis.Ping(ctx).Err(); err != nil {
+			enabled = false
+		}
+	}
+	return &cacheService{redis: redis, enabled: enabled}
+}
+
+func (s *cacheService) IsAvailable() bool {
+	return s.enabled && s.redis != nil
 }
 
 func (s *cacheService) GetClusterInfo(ctx context.Context, clusterID string) (*dto.ClusterInfoResponse, bool) {
+	if !s.IsAvailable() {
+		return nil, false
+	}
+
 	key := fmt.Sprintf("cluster:info:%s", clusterID)
 	data, err := s.redis.Get(ctx, key).Result()
 	if err != nil {
@@ -45,6 +64,10 @@ func (s *cacheService) GetClusterInfo(ctx context.Context, clusterID string) (*d
 }
 
 func (s *cacheService) SetClusterInfo(ctx context.Context, clusterID string, info *dto.ClusterInfoResponse, ttl time.Duration) error {
+	if !s.IsAvailable() {
+		return nil // Skip silently when Redis unavailable
+	}
+
 	key := fmt.Sprintf("cluster:info:%s", clusterID)
 	data, err := json.Marshal(info)
 	if err != nil {
@@ -55,6 +78,10 @@ func (s *cacheService) SetClusterInfo(ctx context.Context, clusterID string, inf
 }
 
 func (s *cacheService) GetClusterStats(ctx context.Context, clusterID string) (*dto.ClusterStatsResponse, bool) {
+	if !s.IsAvailable() {
+		return nil, false
+	}
+
 	key := fmt.Sprintf("cluster:stats:%s", clusterID)
 	data, err := s.redis.Get(ctx, key).Result()
 	if err != nil {
@@ -70,6 +97,10 @@ func (s *cacheService) GetClusterStats(ctx context.Context, clusterID string) (*
 }
 
 func (s *cacheService) SetClusterStats(ctx context.Context, clusterID string, stats *dto.ClusterStatsResponse, ttl time.Duration) error {
+	if !s.IsAvailable() {
+		return nil
+	}
+
 	key := fmt.Sprintf("cluster:stats:%s", clusterID)
 	data, err := json.Marshal(stats)
 	if err != nil {
@@ -80,6 +111,10 @@ func (s *cacheService) SetClusterStats(ctx context.Context, clusterID string, st
 }
 
 func (s *cacheService) GetReplicationStatus(ctx context.Context, clusterID string) (*dto.ReplicationStatusResponse, bool) {
+	if !s.IsAvailable() {
+		return nil, false
+	}
+
 	key := fmt.Sprintf("cluster:replication:%s", clusterID)
 	data, err := s.redis.Get(ctx, key).Result()
 	if err != nil {
@@ -95,6 +130,10 @@ func (s *cacheService) GetReplicationStatus(ctx context.Context, clusterID strin
 }
 
 func (s *cacheService) SetReplicationStatus(ctx context.Context, clusterID string, status *dto.ReplicationStatusResponse, ttl time.Duration) error {
+	if !s.IsAvailable() {
+		return nil
+	}
+
 	key := fmt.Sprintf("cluster:replication:%s", clusterID)
 	data, err := json.Marshal(status)
 	if err != nil {
@@ -105,6 +144,10 @@ func (s *cacheService) SetReplicationStatus(ctx context.Context, clusterID strin
 }
 
 func (s *cacheService) InvalidateCluster(ctx context.Context, clusterID string) error {
+	if !s.IsAvailable() {
+		return nil
+	}
+
 	keys := []string{
 		fmt.Sprintf("cluster:info:%s", clusterID),
 		fmt.Sprintf("cluster:stats:%s", clusterID),
@@ -115,6 +158,10 @@ func (s *cacheService) InvalidateCluster(ctx context.Context, clusterID string) 
 }
 
 func (s *cacheService) InvalidateClusterInfo(ctx context.Context, clusterID string) error {
+	if !s.IsAvailable() {
+		return nil
+	}
+
 	key := fmt.Sprintf("cluster:info:%s", clusterID)
 	return s.redis.Del(ctx, key).Err()
 }

@@ -577,24 +577,6 @@ func (h *PostgreSQLClusterHandler) UpdateConfig(c *gin.Context) {
 
 // GetEndpoints returns cluster connection endpoints
 // @Summary Get connection endpoints
-// @Tags PostgreSQL Cluster
-// @Produce json
-// @Param id path string true "Cluster ID"
-// @Success 200 {object} dto.ClusterInfoResponse
-// @Router /api/v1/postgres/cluster/{id}/endpoints [get]
-func (h *PostgreSQLClusterHandler) GetEndpoints(c *gin.Context) {
-	clusterID := c.Param("id")
-
-	endpoints, err := h.clusterService.GetEndpoints(c.Request.Context(), clusterID)
-	if err != nil {
-		h.logger.Error("failed to get endpoints", zap.String("cluster_id", clusterID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, endpoints)
-}
-
 // ==================== Patroni Management Endpoints ====================
 
 // PatroniSwitchover performs manual switchover
@@ -683,27 +665,6 @@ func (h *PostgreSQLClusterHandler) PatroniResume(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.APIResponse{
 		Success: true,
 		Message: "Cluster management resumed",
-	})
-}
-
-// PatroniStatus gets Patroni cluster status
-// @Summary Get Patroni cluster status
-// @Tags Patroni Management
-// @Produce json
-// @Param id path string true "Cluster ID"
-// @Success 200 {object} dto.PatroniStatusResponse
-// @Router /api/v1/postgres/cluster/{id}/patroni/status [get]
-func (h *PostgreSQLClusterHandler) PatroniStatus(c *gin.Context) {
-	clusterID := c.Param("id")
-
-	h.logger.Info("patroni status requested", zap.String("cluster_id", clusterID))
-
-	// Mock response - would query Patroni REST API
-	c.JSON(http.StatusOK, dto.PatroniStatusResponse{
-		Scope:    clusterID,
-		Timeline: 1,
-		Paused:   false,
-		Members:  []dto.PatroniMember{},
 	})
 }
 
@@ -831,51 +792,6 @@ func (h *PostgreSQLClusterHandler) TestReplication(c *gin.Context) {
 // TestConnection tests database connection
 // @Summary Test database connection
 // @Tags PostgreSQL Cluster
-// @Accept json
-// @Produce json
-// @Param id path string true "Cluster ID"
-// @Param request body dto.TestConnectionRequest false "Connection parameters"
-// @Success 200 {object} dto.TestConnectionResponse
-// @Router /api/v1/postgres/cluster/{id}/test-connection [post]
-func (h *PostgreSQLClusterHandler) TestConnection(c *gin.Context) {
-	clusterID := c.Param("id")
-
-	var req dto.TestConnectionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		// Allow empty body
-		req = dto.TestConnectionRequest{}
-	}
-
-	result, err := h.clusterService.TestConnection(c.Request.Context(), clusterID, req)
-	if err != nil {
-		h.logger.Error("failed to test connection", zap.String("cluster_id", clusterID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, result)
-}
-
-// GetConnectionInfo returns detailed connection information
-// @Summary Get connection information
-// @Tags PostgreSQL Cluster
-// @Produce json
-// @Param id path string true "Cluster ID"
-// @Success 200 {object} dto.ConnectionInfoResponse
-// @Router /api/v1/postgres/cluster/{id}/connection-info [get]
-func (h *PostgreSQLClusterHandler) GetConnectionInfo(c *gin.Context) {
-	clusterID := c.Param("id")
-
-	info, err := h.clusterService.GetConnectionInfo(c.Request.Context(), clusterID)
-	if err != nil {
-		h.logger.Error("failed to get connection info", zap.String("cluster_id", clusterID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, info)
-}
-
 // GetTables lists all tables in a database
 // @Summary List database tables
 // @Tags PostgreSQL Cluster

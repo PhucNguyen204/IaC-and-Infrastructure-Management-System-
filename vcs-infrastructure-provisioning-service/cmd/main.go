@@ -43,25 +43,10 @@ func main() {
 
 	if err := postgresDb.AutoMigrate(
 		&entities.Infrastructure{},
-		&entities.PostgreSQLInstance{},
-		&entities.NginxInstance{},
 		&entities.PostgreSQLCluster{},
 		&entities.ClusterNode{},
 		&entities.EtcdNode{},
 		&entities.FailoverEvent{},
-		&entities.NginxDomain{},
-		&entities.NginxRoute{},
-		&entities.NginxUpstream{},
-		&entities.NginxUpstreamBackend{},
-		&entities.NginxCertificate{},
-		&entities.NginxSecurity{},
-		&entities.PostgresDatabase{},
-		&entities.PostgresBackup{},
-		&entities.DockerService{},
-		&entities.DockerEnvVar{},
-		&entities.DockerPort{},
-		&entities.DockerNetwork{},
-		&entities.DockerHealthCheck{},
 		&entities.Stack{},
 		&entities.StackResource{},
 		&entities.StackTemplate{},
@@ -74,9 +59,6 @@ func main() {
 		&entities.NginxServerBlock{},
 		&entities.NginxLocation{},
 		&entities.NginxFailoverEvent{},
-		// K8s Cluster entities
-		&entities.K8sCluster{},
-		&entities.K8sNode{},
 		// DinD (Docker-in-Docker) entities
 		&entities.DinDEnvironment{},
 		&entities.DinDCommandHistory{},
@@ -92,38 +74,24 @@ func main() {
 	kafkaProducer := kafka.NewKafkaProducer(envConfig.KafkaEnv, logger)
 	defer kafkaProducer.Close()
 
-	redisFactory := databases.NewRedisFactory(envConfig.RedisEnv)
+	redisFactory := databases.NewRedisFactory(envConfig.RedisEnv, logger)
 	redisClient := redisFactory.ConnectRedis()
 
 	infraRepo := repositories.NewInfrastructureRepository(postgresDb)
-	pgRepo := repositories.NewPostgreSQLRepository(postgresDb)
-	nginxRepo := repositories.NewNginxRepository(postgresDb)
 	clusterRepo := repositories.NewPostgreSQLClusterRepository(postgresDb)
 	nginxClusterRepo := repositories.NewNginxClusterRepository(postgresDb)
-	k8sClusterRepo := repositories.NewK8sClusterRepository(postgresDb)
-	pgDatabaseRepo := repositories.NewPostgresDatabaseRepository(postgresDb)
-	dockerRepo := repositories.NewDockerServiceRepository(postgresDb)
 	stackRepo := repositories.NewStackRepository(postgresDb)
 	dinDRepo := repositories.NewDinDRepository(postgresDb)
 
 	cacheService := services.NewCacheService(redisClient)
-	pgService := services.NewPostgreSQLService(infraRepo, pgRepo, dockerService, kafkaProducer, logger)
-	nginxService := services.NewNginxService(infraRepo, nginxRepo, dockerService, kafkaProducer, logger)
 	clusterService := services.NewPostgreSQLClusterService(infraRepo, clusterRepo, dockerService, kafkaProducer, cacheService, logger)
 	nginxClusterService := services.NewNginxClusterService(infraRepo, nginxClusterRepo, dockerService, kafkaProducer, logger)
-	k8sClusterService := services.NewK8sClusterService(k8sClusterRepo, infraRepo, dockerService, kafkaProducer, logger)
-	pgDatabaseService := services.NewPostgresDatabaseService(pgDatabaseRepo, pgRepo, dockerService)
-	dockerSvcService := services.NewDockerServiceService(dockerRepo, infraRepo, dockerService)
 	dinDService := services.NewDinDService(dinDRepo, infraRepo, dockerService, kafkaProducer, logger)
 	stackService := services.NewStackService(
 		stackRepo,
 		infraRepo,
-		nginxService,
-		pgService,
 		clusterService,
 		clusterRepo,
-		pgDatabaseService,
-		dockerSvcService,
 		nginxClusterService,
 		nginxClusterRepo,
 		dinDService,
@@ -154,12 +122,8 @@ func main() {
 
 	jwtMiddleware := middlewares.NewJWTMiddleware(envConfig.AuthEnv.JWTSecret)
 
-	pgHandler := httpHandler.NewPostgreSQLHandler(pgService)
-	nginxHandler := httpHandler.NewNginxHandler(nginxService)
 	clusterHandler := httpHandler.NewPostgreSQLClusterHandler(clusterService, logger)
 	nginxClusterHandler := httpHandler.NewNginxClusterHandler(nginxClusterService, logger)
-	k8sClusterHandler := httpHandler.NewK8sClusterHandler(k8sClusterService, logger)
-	pgDatabaseHandler := httpHandler.NewPostgresDatabaseHandler(pgDatabaseService)
 	stackHandler := httpHandler.NewStackHandler(stackService)
 	dinDHandler := httpHandler.NewDinDHandler(dinDService, logger)
 
@@ -180,11 +144,7 @@ func main() {
 	r.GET("/ws", wsHandler.HandleWebSocket)
 
 	apiV1 := r.Group("/api/v1", jwtMiddleware.CheckBearerAuth())
-	pgHandler.RegisterRoutes(apiV1)
-	nginxHandler.RegisterRoutes(apiV1)
 	nginxClusterHandler.RegisterRoutes(apiV1)
-	k8sClusterHandler.RegisterRoutes(apiV1)
-	pgDatabaseHandler.RegisterRoutes(apiV1)
 	stackHandler.RegisterRoutes(apiV1)
 	dinDHandler.RegisterRoutes(apiV1)
 
@@ -216,14 +176,10 @@ func main() {
 		clusterGroup.GET("/:id/databases", clusterHandler.ListDatabases)
 		clusterGroup.DELETE("/:id/databases/:dbname", clusterHandler.DeleteDatabase)
 		clusterGroup.PUT("/:id/config", clusterHandler.UpdateConfig)
-		clusterGroup.GET("/:id/endpoints", clusterHandler.GetEndpoints)
 
 		// Patroni Management routes
 		clusterGroup.POST("/:id/patroni/switchover", clusterHandler.PatroniSwitchover)
 		clusterGroup.POST("/:id/patroni/reinit", clusterHandler.PatroniReinit)
-		clusterGroup.POST("/:id/patroni/pause", clusterHandler.PatroniPause)
-		clusterGroup.POST("/:id/patroni/resume", clusterHandler.PatroniResume)
-		clusterGroup.GET("/:id/patroni/status", clusterHandler.PatroniStatus)
 
 		// Backup/Restore routes
 		clusterGroup.POST("/:id/backup", clusterHandler.BackupCluster)
@@ -233,10 +189,6 @@ func main() {
 		// Query & Replication Test
 		clusterGroup.POST("/:id/query", clusterHandler.ExecuteQuery)
 		clusterGroup.POST("/:id/test-replication", clusterHandler.TestReplication)
-
-		// Connection Management
-		clusterGroup.POST("/:id/test-connection", clusterHandler.TestConnection)
-		clusterGroup.GET("/:id/connection-info", clusterHandler.GetConnectionInfo)
 
 		// Schema Browser
 		clusterGroup.GET("/:id/databases/:database/tables", clusterHandler.GetTables)

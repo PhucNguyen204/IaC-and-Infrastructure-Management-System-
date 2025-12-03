@@ -55,27 +55,7 @@ func (r *infrastructureRepository) Delete(id string) error {
 func (r *infrastructureRepository) FindByContainerID(ctx context.Context, containerID string) (*entities.Infrastructure, error) {
 	var infra entities.Infrastructure
 
-	var pgInstance entities.PostgreSQLInstance
-	if err := r.db.Where("container_id = ?", containerID).First(&pgInstance).Error; err == nil {
-		if err := r.db.Where("id = ?", pgInstance.InfrastructureID).First(&infra).Error; err == nil {
-			return &infra, nil
-		}
-	}
-
-	var nginxInstance entities.NginxInstance
-	if err := r.db.Where("container_id = ?", containerID).First(&nginxInstance).Error; err == nil {
-		if err := r.db.Where("id = ?", nginxInstance.InfrastructureID).First(&infra).Error; err == nil {
-			return &infra, nil
-		}
-	}
-
-	var dockerService entities.DockerService
-	if err := r.db.Where("container_id = ?", containerID).First(&dockerService).Error; err == nil {
-		if err := r.db.Where("id = ?", dockerService.InfrastructureID).First(&infra).Error; err == nil {
-			return &infra, nil
-		}
-	}
-
+	// Check in cluster nodes (PostgreSQL, Nginx clusters)
 	var clusterNode entities.ClusterNode
 	if err := r.db.Where("container_id = ?", containerID).First(&clusterNode).Error; err == nil {
 		var cluster entities.PostgreSQLCluster
@@ -86,13 +66,22 @@ func (r *infrastructureRepository) FindByContainerID(ctx context.Context, contai
 		}
 	}
 
-	var etcdNode entities.EtcdNode
-	if err := r.db.Where("container_id = ?", containerID).First(&etcdNode).Error; err == nil {
-		var cluster entities.PostgreSQLCluster
-		if err := r.db.Where("id = ?", etcdNode.ClusterID).First(&cluster).Error; err == nil {
+	// Check in Nginx cluster nodes
+	var nginxNode entities.NginxNode
+	if err := r.db.Where("container_id = ?", containerID).First(&nginxNode).Error; err == nil {
+		var cluster entities.NginxCluster
+		if err := r.db.Where("id = ?", nginxNode.ClusterID).First(&cluster).Error; err == nil {
 			if err := r.db.Where("id = ?", cluster.InfrastructureID).First(&infra).Error; err == nil {
 				return &infra, nil
 			}
+		}
+	}
+
+	// Check in DinD environments
+	var dindEnv entities.DinDEnvironment
+	if err := r.db.Where("container_id = ?", containerID).First(&dindEnv).Error; err == nil {
+		if err := r.db.Where("id = ?", dindEnv.InfrastructureID).First(&infra).Error; err == nil {
+			return &infra, nil
 		}
 	}
 

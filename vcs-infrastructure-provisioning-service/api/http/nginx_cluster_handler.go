@@ -39,12 +39,10 @@ func (h *NginxClusterHandler) RegisterRoutes(r *gin.RouterGroup) {
 
 		// Node operations
 		clusterGroup.POST("/:id/nodes", h.AddNode)
-		clusterGroup.GET("/:id/nodes/:nodeId", h.GetNodeInfo)
 		clusterGroup.DELETE("/:id/nodes/:nodeId", h.RemoveNode)
 
 		// Configuration
 		clusterGroup.PUT("/:id/config", h.UpdateClusterConfig)
-		clusterGroup.POST("/:id/sync-config", h.SyncConfig)
 
 		// Upstreams
 		clusterGroup.GET("/:id/upstreams", h.ListUpstreams)
@@ -60,8 +58,6 @@ func (h *NginxClusterHandler) RegisterRoutes(r *gin.RouterGroup) {
 		// Health & Monitoring
 		clusterGroup.GET("/:id/health", h.GetClusterHealth)
 		clusterGroup.GET("/:id/metrics", h.GetClusterMetrics)
-		clusterGroup.POST("/:id/test-connection", h.TestConnection)
-		clusterGroup.GET("/:id/connection-info", h.GetConnectionInfo)
 
 		// Failover
 		clusterGroup.POST("/:id/failover", h.TriggerFailover)
@@ -300,37 +296,6 @@ func (h *NginxClusterHandler) AddNode(c *gin.Context) {
 	})
 }
 
-// GetNodeInfo retrieves node information
-// @Summary Get Node Info
-// @Tags Nginx Cluster
-// @Produce json
-// @Param id path string true "Cluster ID"
-// @Param nodeId path string true "Node ID"
-// @Success 200 {object} dto.NginxNodeInfo
-// @Router /api/v1/nginx/cluster/{id}/nodes/{nodeId} [get]
-func (h *NginxClusterHandler) GetNodeInfo(c *gin.Context) {
-	nodeID := c.Param("nodeId")
-
-	result, err := h.clusterService.GetNodeInfo(c.Request.Context(), nodeID)
-	if err != nil {
-		h.logger.Error("failed to get node info", zap.String("node_id", nodeID), zap.Error(err))
-		c.JSON(http.StatusNotFound, dto.APIResponse{
-			Success: false,
-			Code:    "NOT_FOUND",
-			Message: "Node not found",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, dto.APIResponse{
-		Success: true,
-		Code:    "SUCCESS",
-		Message: "Node info retrieved successfully",
-		Data:    result,
-	})
-}
-
 // RemoveNode removes a node from the cluster
 // @Summary Remove Node from Cluster
 // @Tags Nginx Cluster
@@ -397,33 +362,6 @@ func (h *NginxClusterHandler) UpdateClusterConfig(c *gin.Context) {
 		Success: true,
 		Code:    "SUCCESS",
 		Message: "Config updated successfully",
-	})
-}
-
-// SyncConfig synchronizes configuration to all nodes
-// @Summary Sync Config to All Nodes
-// @Tags Nginx Cluster
-// @Param id path string true "Cluster ID"
-// @Success 200 {object} dto.APIResponse
-// @Router /api/v1/nginx/cluster/{id}/sync-config [post]
-func (h *NginxClusterHandler) SyncConfig(c *gin.Context) {
-	clusterID := c.Param("id")
-
-	if err := h.clusterService.SyncConfig(c.Request.Context(), clusterID); err != nil {
-		h.logger.Error("failed to sync config", zap.String("cluster_id", clusterID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, dto.APIResponse{
-			Success: false,
-			Code:    "INTERNAL_SERVER_ERROR",
-			Message: "Failed to sync config",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, dto.APIResponse{
-		Success: true,
-		Code:    "SUCCESS",
-		Message: "Config synced to all nodes",
 	})
 }
 
@@ -711,64 +649,6 @@ func (h *NginxClusterHandler) GetClusterMetrics(c *gin.Context) {
 			Success: false,
 			Code:    "INTERNAL_SERVER_ERROR",
 			Message: "Failed to get cluster metrics",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, dto.APIResponse{
-		Success: true,
-		Code:    "SUCCESS",
-		Data:    result,
-	})
-}
-
-// TestConnection tests connection to the cluster
-// @Summary Test Connection
-// @Tags Nginx Cluster
-// @Produce json
-// @Param id path string true "Cluster ID"
-// @Success 200 {object} dto.TestNginxConnectionResponse
-// @Router /api/v1/nginx/cluster/{id}/test-connection [post]
-func (h *NginxClusterHandler) TestConnection(c *gin.Context) {
-	clusterID := c.Param("id")
-
-	result, err := h.clusterService.TestConnection(c.Request.Context(), clusterID)
-	if err != nil {
-		h.logger.Error("failed to test connection", zap.String("cluster_id", clusterID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, dto.APIResponse{
-			Success: false,
-			Code:    "INTERNAL_SERVER_ERROR",
-			Message: "Failed to test connection",
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, dto.APIResponse{
-		Success: true,
-		Code:    "SUCCESS",
-		Data:    result,
-	})
-}
-
-// GetConnectionInfo returns connection information
-// @Summary Get Connection Info
-// @Tags Nginx Cluster
-// @Produce json
-// @Param id path string true "Cluster ID"
-// @Success 200 {object} dto.NginxConnectionInfoResponse
-// @Router /api/v1/nginx/cluster/{id}/connection-info [get]
-func (h *NginxClusterHandler) GetConnectionInfo(c *gin.Context) {
-	clusterID := c.Param("id")
-
-	result, err := h.clusterService.GetConnectionInfo(c.Request.Context(), clusterID)
-	if err != nil {
-		h.logger.Error("failed to get connection info", zap.String("cluster_id", clusterID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, dto.APIResponse{
-			Success: false,
-			Code:    "INTERNAL_SERVER_ERROR",
-			Message: "Failed to get connection info",
 			Error:   err.Error(),
 		})
 		return
