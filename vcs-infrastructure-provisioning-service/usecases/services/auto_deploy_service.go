@@ -57,12 +57,10 @@ func (s *autoDeployService) Deploy(ctx context.Context, userID string, req dto.A
 		Endpoints:             make(map[string]string),
 	}
 
-	// Detect required infrastructure from environment variables
 	detectedInfra := s.detectInfraFromEnv(req.Environment)
 
-	// Create infrastructure based on detection
 	infraEnvVars := make(map[string]string)
-	infraNetworks := make([]string, 0) // Collect all infrastructure networks
+	infraNetworks := make([]string, 0) 
 
 	for _, infraType := range detectedInfra {
 		switch infraType {
@@ -156,13 +154,159 @@ func (s *autoDeployService) detectInfraFromEnv(env map[string]string) []string {
 	return detected
 }
 
-// findExistingClickHouse finds an existing ClickHouse container
+func (s *autoDeployService) buildClickHouseTablesFromEnv(env map[string]string) []dto.ClickHouseTableDef {
+	var tables []dto.ClickHouseTableDef
+
+	if logTable, ok := env["LOG_TABLE"]; ok && logTable != "" {
+		tables = append(tables, dto.ClickHouseTableDef{
+			Name:   logTable,
+			Engine: "MergeTree",
+			Columns: []dto.ClickHouseColumnDef{
+				{Name: "id", Type: "String"},
+				{Name: "timestamp", Type: "DateTime", DefaultValue: "now()"},
+				{Name: "level", Type: "String"},
+				{Name: "source", Type: "String"},
+				{Name: "message", Type: "String"},
+				{Name: "hostname", Type: "String"},
+				{Name: "process_name", Type: "String"},
+				{Name: "process_id", Type: "UInt32"},
+				{Name: "user", Type: "String"},
+				{Name: "event_type", Type: "String"},
+				{Name: "raw_data", Type: "String"},
+			},
+			OrderBy:     []string{"timestamp", "id"},
+			PartitionBy: "toYYYYMM(timestamp)",
+		})
+		s.logger.Info("Adding LOG_TABLE", zap.String("table", logTable))
+	}
+
+	if matchingTable, ok := env["MATCHING_TABLE"]; ok && matchingTable != "" {
+		tables = append(tables, dto.ClickHouseTableDef{
+			Name:   matchingTable,
+			Engine: "MergeTree",
+			Columns: []dto.ClickHouseColumnDef{
+				{Name: "id", Type: "String"},
+				{Name: "rule_id", Type: "String"},
+				{Name: "log_id", Type: "String"},
+				{Name: "matched_at", Type: "DateTime", DefaultValue: "now()"},
+				{Name: "matched_field", Type: "String"},
+				{Name: "matched_value", Type: "String"},
+				{Name: "score", Type: "Float64"},
+			},
+			OrderBy: []string{"matched_at", "id"},
+		})
+		s.logger.Info("Adding MATCHING_TABLE", zap.String("table", matchingTable))
+	}
+
+	if alertTable, ok := env["ALERT_TABLE"]; ok && alertTable != "" {
+		tables = append(tables, dto.ClickHouseTableDef{
+			Name:   alertTable,
+			Engine: "MergeTree",
+			Columns: []dto.ClickHouseColumnDef{
+				{Name: "id", Type: "String"},
+				{Name: "rule_id", Type: "String"},
+				{Name: "rule_name", Type: "String"},
+				{Name: "severity", Type: "String"},
+				{Name: "message", Type: "String"},
+				{Name: "log_id", Type: "String"},
+				{Name: "matched_text", Type: "String"},
+				{Name: "source", Type: "String"},
+				{Name: "created_at", Type: "DateTime", DefaultValue: "now()"},
+				{Name: "status", Type: "String", DefaultValue: "'open'"},
+			},
+			OrderBy: []string{"created_at", "id"},
+		})
+		s.logger.Info("Adding ALERT_TABLE", zap.String("table", alertTable))
+	}
+
+	if lookupTable, ok := env["LOOKUP_TABLE"]; ok && lookupTable != "" {
+		tables = append(tables, dto.ClickHouseTableDef{
+			Name:   lookupTable,
+			Engine: "MergeTree",
+			Columns: []dto.ClickHouseColumnDef{
+				{Name: "id", Type: "String"},
+				{Name: "list_name", Type: "String"},
+				{Name: "list_type", Type: "String"},
+				{Name: "value", Type: "String"},
+				{Name: "description", Type: "String"},
+				{Name: "created_at", Type: "DateTime", DefaultValue: "now()"},
+				{Name: "updated_at", Type: "DateTime", DefaultValue: "now()"},
+			},
+			OrderBy: []string{"list_name", "value"},
+		})
+		s.logger.Info("Adding LOOKUP_TABLE", zap.String("table", lookupTable))
+	}
+
+	return tables
+}
+
+func (s *autoDeployService) ensureClickHouseDatabaseAndTables(ctx context.Context, containerName, username, password, database string, env map[string]string) error {
+	s.logger.Info("Ensuring database and tables on existing ClickHouse",
+		zap.String("container", containerName),
+		zap.String("database", database))
+
+	createDBCmd := []string{"clickhouse-client", "--user", username, "--password", password,
+		"-q", fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", database)}
+
+	if _, err := s.dockerSvc.ExecCommand(ctx, containerName, createDBCmd); err != nil {
+		s.logger.Warn("failed to create database (may already exist)", zap.Error(err))
+	} else {
+		s.logger.Info("Database created/verified", zap.String("database", database))
+	}
+
+	tables := s.buildClickHouseTablesFromEnv(env)
+	for _, table := range tables {
+		if err := s.createClickHouseTableViaExec(ctx, containerName, username, password, database, table); err != nil {
+			s.logger.Warn("failed to create table", zap.String("table", table.Name), zap.Error(err))
+		} else {
+			s.logger.Info("Table created", zap.String("table", table.Name))
+		}
+	}
+
+	return nil
+}
+
+func (s *autoDeployService) createClickHouseTableViaExec(ctx context.Context, containerName, username, password, database string, table dto.ClickHouseTableDef) error {
+	var columns []string
+	for _, col := range table.Columns {
+		colDef := fmt.Sprintf("%s %s", col.Name, col.Type)
+		if col.DefaultValue != "" {
+			colDef += fmt.Sprintf(" DEFAULT %s", col.DefaultValue)
+		}
+		columns = append(columns, colDef)
+	}
+
+	engine := table.Engine
+	if engine == "" {
+		engine = "MergeTree"
+	}
+
+	orderBy := "tuple()"
+	if len(table.OrderBy) > 0 {
+		orderBy = fmt.Sprintf("(%s)", strings.Join(table.OrderBy, ", "))
+	}
+
+	createSQL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s) ENGINE = %s ORDER BY %s",
+		database, table.Name, strings.Join(columns, ", "), engine, orderBy)
+
+	if table.PartitionBy != "" {
+		createSQL += fmt.Sprintf(" PARTITION BY %s", table.PartitionBy)
+	}
+
+	cmd := []string{"clickhouse-client", "--user", username, "--password", password, "-q", createSQL}
+
+	if _, err := s.dockerSvc.ExecCommand(ctx, containerName, cmd); err != nil {
+		return fmt.Errorf("failed to create table %s: %w", table.Name, err)
+	}
+
+	return nil
+}
+
 func (s *autoDeployService) findExistingClickHouse(ctx context.Context, requestEnv map[string]string) (*dto.CreatedInfra, map[string]string, string, error) {
-	// List all containers and find one matching iaas-clickhouse-*
 	dockerClient := s.dockerSvc.GetClient()
 	containers, err := dockerClient.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		return nil, nil, "", nil // Return nil to indicate not found
+		return nil, nil, "", nil
 	}
 
 	for _, c := range containers {
@@ -275,6 +419,17 @@ func (s *autoDeployService) createClickHouse(ctx context.Context, userID string,
 	// Try to find existing ClickHouse first
 	if infraInfo, envVars, networkName, err := s.findExistingClickHouse(ctx, env); err == nil && infraInfo != nil {
 		s.logger.Info("Reusing existing ClickHouse", zap.String("containerName", infraInfo.Name))
+
+		// Still create database and tables for existing ClickHouse
+		database := envVars["DB_NAME"]
+		username := envVars["DB_USER"]
+		password := envVars["DB_PASSWORD"]
+
+		// Create database and tables on existing ClickHouse
+		if err := s.ensureClickHouseDatabaseAndTables(ctx, infraInfo.Name, username, password, database, env); err != nil {
+			s.logger.Warn("failed to create database/tables on existing ClickHouse", zap.Error(err))
+		}
+
 		return infraInfo, envVars, networkName, nil
 	}
 	s.logger.Info("creating ClickHouse for auto deploy")
@@ -297,6 +452,9 @@ func (s *autoDeployService) createClickHouse(ctx context.Context, userID string,
 		username = user
 	}
 
+	// Build tables from environment variables
+	tables := s.buildClickHouseTablesFromEnv(env)
+
 	req := dto.CreateClickHouseRequest{
 		ClusterName: clusterName,
 		Version:     "latest",
@@ -305,6 +463,7 @@ func (s *autoDeployService) createClickHouse(ctx context.Context, userID string,
 		Database:    database,
 		CPULimit:    1,
 		MemoryLimit: 1024,
+		Tables:      tables,
 	}
 
 	result, err := s.clickhouseSvc.Create(ctx, userID, req)

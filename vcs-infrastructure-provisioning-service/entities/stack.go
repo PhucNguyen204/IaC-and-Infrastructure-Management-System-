@@ -69,13 +69,13 @@ type StackTemplate struct {
 type StackOperation struct {
 	ID            string    `gorm:"primaryKey;type:varchar(36)"`
 	StackID       string    `gorm:"type:varchar(36);not null;index"`
-	OperationType string    `gorm:"type:varchar(50);not null"` // CREATE, UPDATE, DELETE, CLONE, START, STOP
-	Status        string    `gorm:"type:varchar(50);not null"` // PENDING, IN_PROGRESS, COMPLETED, FAILED
+	OperationType string    `gorm:"type:varchar(50);not null"` 
+	Status        string    `gorm:"type:varchar(50);not null"` 
 	UserID        string    `gorm:"type:varchar(36);not null"`
 	StartedAt     time.Time `gorm:"autoCreateTime"`
 	CompletedAt   *time.Time
 	ErrorMessage  string `gorm:"type:text"`
-	Details       string `gorm:"type:jsonb"` // JSON details about the operation
+	Details       string `gorm:"type:jsonb"` 
 
 	// Relations
 	Stack Stack `gorm:"foreignKey:StackID"`

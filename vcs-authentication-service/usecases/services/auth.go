@@ -150,7 +150,7 @@ func (s *authService) generateAccessToken(userId string, scope []string) (string
 	claims := jwt.MapClaims{
 		"sub":   userId,
 		"scope": scope,
-		"exp":   time.Now().Add(time.Minute * 15).Unix(),
+		"exp":   time.Now().Add(time.Minute * 120).Unix(),
 		"iat":   time.Now().Unix(),
 	}
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

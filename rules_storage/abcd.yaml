@@ -1,0 +1,8 @@
+- id: RULE-ABCD
+  name: New Rule From Host
+  description: This rule was added from host
+  severity: info
+  keywords:
+    - test
+    - pattern
+  enabled: true

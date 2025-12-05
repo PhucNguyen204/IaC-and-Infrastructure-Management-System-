@@ -64,7 +64,6 @@ func NewStackService(
 func (s *stackService) CreateStack(ctx context.Context, userID string, req dto.CreateStackRequest) (*dto.StackInfo, error) {
 	stackID := uuid.New().String()
 
-	// Create stack record
 	tagsJSON, _ := json.Marshal(req.Tags)
 	stack := &entities.Stack{
 		ID:          stackID,

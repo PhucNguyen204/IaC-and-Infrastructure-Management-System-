@@ -1,0 +1,12 @@
+- id: RULE-HOANG
+  name: New Rule From Host
+  description: This rule was added from host
+  severity: info
+  keywords:
+    - test
+    - pattern
+  enabled: true
+
+
+# an toàn thông tin
+asymmetric encryption

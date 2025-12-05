@@ -13,7 +13,6 @@ type NginxCluster struct {
 	NodeCount        int            `gorm:"not null;default:2"`
 	MasterNodeID     string         `gorm:"type:varchar(36)"`
 
-	// High Availability
 	VirtualIP           string `gorm:"type:varchar(45)"` // VIP managed by Keepalived
 	VRRPInterface       string `gorm:"type:varchar(20);default:'eth0'"`
 	VRRPRouterID        int    `gorm:"default:51"`

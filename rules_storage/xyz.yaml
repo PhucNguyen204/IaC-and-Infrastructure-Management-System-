@@ -1,0 +1,10 @@
+- id: RULE-xyz
+  name: rule for chill
+  description: This rule was added from host
+  severity: info
+  keywords:
+    - test
+    - phucnguyen204
+    - performed
+
+  enabled: true

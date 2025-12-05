@@ -1,8 +1,5 @@
 package dto
 
-// ================== ClickHouse Cluster DTOs ==================
-
-// CreateClickHouseRequest for creating ClickHouse instance
 type CreateClickHouseRequest struct {
 	ClusterName string `json:"cluster_name" binding:"required"`
 	Version     string `json:"version"`  // latest, 24.1, 23.8 (default: latest)
@@ -10,16 +7,13 @@ type CreateClickHouseRequest struct {
 	Password    string `json:"password" binding:"required,min=6"`
 	Database    string `json:"database" binding:"required"`
 
-	// Resources
 	CPULimit    int64 `json:"cpu_limit"`    // CPU cores
 	MemoryLimit int64 `json:"memory_limit"` // MB
 	StorageSize int   `json:"storage_size"` // GB
 
-	// Initial tables to create
 	Tables []ClickHouseTableDef `json:"tables,omitempty"`
 }
 
-// ClickHouseTableDef defines a table schema
 type ClickHouseTableDef struct {
 	Name        string                `json:"name" binding:"required"`
 	Engine      string                `json:"engine,omitempty"` // MergeTree (default), ReplacingMergeTree, etc
