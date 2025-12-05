@@ -1,0 +1,43 @@
+- id: RULE-001
+  name: High CPU Detection
+  description: Detect high CPU usage above 90%
+  severity: high
+  conditions:
+    - cpu_usage > 90
+  actions:
+    - alert
+    - log
+  enabled: true
+
+- id: RULE-002
+  name: Memory Alert
+  description: Detect high memory usage above 80%
+  severity: medium
+  conditions:
+    - memory_usage > 80
+  actions:
+    - alert
+  enabled: true
+
+- id: RULE-003
+  name: Disk Space Warning
+  description: Detect low disk space below 20%
+  severity: warning
+  conditions:
+    - disk_free < 20
+  actions:
+    - log
+  enabled: true
+
+- id: RULE-004
+  name: Network Anomaly
+  description: Detect unusual network traffic
+  severity: critical
+  conditions:
+    - network_bytes_out > 1000000000
+    - connection_count > 1000
+  actions:
+    - alert
+    - log
+    - notify
+  enabled: true

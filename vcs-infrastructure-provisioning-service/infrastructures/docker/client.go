@@ -37,6 +37,7 @@ type IDockerService interface {
 	CreateVolume(ctx context.Context, volumeName string) error
 	RemoveVolume(ctx context.Context, volumeName string) error
 	ListenToEvents(ctx context.Context, eventChan chan<- events.Message) error
+	GetClient() *client.Client
 }
 
 type ContainerConfig struct {
@@ -72,6 +73,10 @@ func NewDockerService(logger logger.ILogger) (IDockerService, error) {
 		client: cli,
 		logger: logger,
 	}, nil
+}
+
+func (ds *dockerService) GetClient() *client.Client {
+	return ds.client
 }
 
 func (ds *dockerService) CreateContainer(ctx context.Context, config ContainerConfig) (string, error) {

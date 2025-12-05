@@ -15,6 +15,7 @@ const (
 	TypeDockerService     InfrastructureType = "docker_service"
 	TypeDinD              InfrastructureType = "dind" // Docker-in-Docker
 	InfraTypeK8sCluster   InfrastructureType = "k8s_cluster"
+	TypeClickHouse        InfrastructureType = "clickhouse"
 )
 
 const (

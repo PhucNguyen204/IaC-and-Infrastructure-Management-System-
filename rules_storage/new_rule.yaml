@@ -1,0 +1,5 @@
+﻿rules:
+  - name: new_rule_from_host
+    description: This rule was added from host
+    pattern: "test pattern"
+    severity: info

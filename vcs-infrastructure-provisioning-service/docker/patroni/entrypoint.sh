@@ -47,14 +47,14 @@ wait_for_etcd() {
   local etcd_port=$(echo $etcd_host | cut -d: -f2)
   
   if [ -z "$etcd_hostname" ] || [ -z "$etcd_port" ]; then
-    echo "âš  WARNING: Invalid ETCD_HOST format: ${etcd_host}"
+    echo "Ã¢Å¡Â  WARNING: Invalid ETCD_HOST format: ${etcd_host}"
     echo "Expected format: hostname:port (e.g., etcd-1:2379)"
     return 0
   fi
   
   while [ $attempt -le $max_attempts ]; do
     if check_etcd_health "$etcd_hostname" "$etcd_port"; then
-      echo "âœ“ etcd is ready and healthy at ${etcd_host}!"
+      echo "Ã¢Å“â€œ etcd is ready and healthy at ${etcd_host}!"
       echo "Proceeding with Patroni startup..."
       return 0
     fi
@@ -76,7 +76,7 @@ wait_for_etcd() {
     attempt=$((attempt + 1))
   done
   
-  echo "âš  WARNING: etcd health check failed after ${max_attempts} attempts"
+  echo "Ã¢Å¡Â  WARNING: etcd health check failed after ${max_attempts} attempts"
   echo "This may indicate etcd cluster is not fully initialized"
   echo "Patroni will attempt to connect anyway and will retry automatically"
   echo "If Patroni fails to start, check etcd cluster status"
@@ -232,39 +232,39 @@ echo "Starting Patroni with config:"
 cat /etc/patroni/patroni.yml
 
 # Create custom basebackup script for replicas
-cat > /tmp/custom_basebackup.sh <<'BASEBACKUP_EOF'
+# Note: We use BASEBACKUP_EOF without quotes to allow variable expansion for REPLICATION_PASSWORD
+cat > /tmp/custom_basebackup.sh <<BASEBACKUP_EOF
 #!/bin/bash
 set -e
 
-# Get connection info from Patroni environment
-PGHOST="${PATRONI_SCOPE}-0.${PATRONI_SCOPE}.default.svc.cluster.local"
-PGPORT=5432
-PGUSER="replicator"
+# Export password for pg_basebackup (critical for non-interactive operation)
+export PGPASSWORD="${REPLICATION_PASSWORD:-replicator_pass}"
 
 echo "Creating replica using pg_basebackup..."
-echo "Master: ${PATRONI_MASTER_CONNECT_ADDRESS}"
+echo "Master: \${PATRONI_MASTER_CONNECT_ADDRESS}"
+echo "Cloning from host: \${PATRONI_MASTER_HOST}"
 
 # Clean data directory if exists
-if [ -d "${PGDATA}" ]; then
-  echo "Cleaning ${PGDATA}..."
-  rm -rf "${PGDATA}"/*
+if [ -d "\${PGDATA}" ]; then
+  echo "Cleaning \${PGDATA}..."
+  rm -rf "\${PGDATA}"/*
 fi
 
-# Run pg_basebackup
-/usr/lib/postgresql/17/bin/pg_basebackup \
-  -h "${PATRONI_MASTER_HOST:-patroni-node-1}" \
-  -p 5432 \
-  -U replicator \
-  -D "${PGDATA}" \
-  -X stream \
-  -c fast \
-  -R \
+# Run pg_basebackup with password from environment
+/usr/lib/postgresql/17/bin/pg_basebackup \\
+  -h "\${PATRONI_MASTER_HOST:-patroni-node-1}" \\
+  -p 5432 \\
+  -U replicator \\
+  -D "\${PGDATA}" \\
+  -X stream \\
+  -c fast \\
+  -R \\
   -v
 
 # Fix permissions after basebackup
-echo "Fixing permissions on ${PGDATA}..."
-chmod 700 "${PGDATA}"
-chmod 600 "${PGDATA}"/*.conf 2>/dev/null || true
+echo "Fixing permissions on \${PGDATA}..."
+chmod 700 "\${PGDATA}"
+chmod 600 "\${PGDATA}"/*.conf 2>/dev/null || true
 
 echo "Basebackup completed successfully"
 exit 0

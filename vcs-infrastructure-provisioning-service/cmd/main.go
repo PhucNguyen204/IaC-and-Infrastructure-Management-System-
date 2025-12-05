@@ -62,6 +62,9 @@ func main() {
 		// DinD (Docker-in-Docker) entities
 		&entities.DinDEnvironment{},
 		&entities.DinDCommandHistory{},
+		// ClickHouse entities
+		&entities.ClickHouseCluster{},
+		&entities.ClickHouseNode{},
 	); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
@@ -82,11 +85,14 @@ func main() {
 	nginxClusterRepo := repositories.NewNginxClusterRepository(postgresDb)
 	stackRepo := repositories.NewStackRepository(postgresDb)
 	dinDRepo := repositories.NewDinDRepository(postgresDb)
+	clickhouseRepo := repositories.NewClickHouseRepository(postgresDb)
 
 	cacheService := services.NewCacheService(redisClient)
 	clusterService := services.NewPostgreSQLClusterService(infraRepo, clusterRepo, dockerService, kafkaProducer, cacheService, logger)
 	nginxClusterService := services.NewNginxClusterService(infraRepo, nginxClusterRepo, dockerService, kafkaProducer, logger)
 	dinDService := services.NewDinDService(dinDRepo, infraRepo, dockerService, kafkaProducer, logger)
+	clickhouseService := services.NewClickHouseService(infraRepo, clickhouseRepo, dockerService, logger)
+	autoDeployService := services.NewAutoDeployService(clickhouseService, clusterService, dockerService, logger)
 	stackService := services.NewStackService(
 		stackRepo,
 		infraRepo,
@@ -126,6 +132,8 @@ func main() {
 	nginxClusterHandler := httpHandler.NewNginxClusterHandler(nginxClusterService, logger)
 	stackHandler := httpHandler.NewStackHandler(stackService)
 	dinDHandler := httpHandler.NewDinDHandler(dinDService, logger)
+	clickhouseHandler := httpHandler.NewClickHouseHandler(clickhouseService)
+	autoDeployHandler := httpHandler.NewAutoDeployHandler(autoDeployService, logger)
 
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
@@ -147,6 +155,8 @@ func main() {
 	nginxClusterHandler.RegisterRoutes(apiV1)
 	stackHandler.RegisterRoutes(apiV1)
 	dinDHandler.RegisterRoutes(apiV1)
+	clickhouseHandler.RegisterRoutes(apiV1)
+	autoDeployHandler.RegisterRoutes(apiV1)
 
 	// PostgreSQL Cluster routes
 	clusterGroup := apiV1.Group("/postgres/cluster")
