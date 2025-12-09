@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/infrastructures/elasticsearch"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/pkg/env"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/pkg/logger"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
 
@@ -37,16 +37,41 @@ func (m *MockElasticsearchClient) QueryMetrics(ctx context.Context, instanceID s
 	return args.Get(0).([]elasticsearch.MetricEntry), args.Error(1)
 }
 
+func (m *MockElasticsearchClient) IndexUptimeEvent(ctx context.Context, event elasticsearch.UptimeEvent) error {
+	args := m.Called(ctx, event)
+	return args.Error(0)
+}
+
+func (m *MockElasticsearchClient) QueryUptimeEvents(ctx context.Context, filter elasticsearch.UptimeFilter) ([]elasticsearch.UptimeEvent, error) {
+	args := m.Called(ctx, filter)
+	return args.Get(0).([]elasticsearch.UptimeEvent), args.Error(1)
+}
+
+func (m *MockElasticsearchClient) QueryUptimeByUser(ctx context.Context, userID string, from, to time.Time) ([]elasticsearch.UptimeEvent, error) {
+	args := m.Called(ctx, userID, from, to)
+	return args.Get(0).([]elasticsearch.UptimeEvent), args.Error(1)
+}
+
+func (m *MockElasticsearchClient) QueryUptimeByType(ctx context.Context, infraType string, from, to time.Time) ([]elasticsearch.UptimeEvent, error) {
+	args := m.Called(ctx, infraType, from, to)
+	return args.Get(0).([]elasticsearch.UptimeEvent), args.Error(1)
+}
+
+func (m *MockElasticsearchClient) QueryAllUptimeEvents(ctx context.Context, from, to time.Time, size int) ([]elasticsearch.UptimeEvent, error) {
+	args := m.Called(ctx, from, to, size)
+	return args.Get(0).([]elasticsearch.UptimeEvent), args.Error(1)
+}
+
 type MockLogger struct{}
 
-func (m *MockLogger) Debug(msg string, fields ...zap.Field)                  {}
-func (m *MockLogger) Info(msg string, fields ...zap.Field)                   {}
-func (m *MockLogger) Warn(msg string, fields ...zap.Field)                   {}
-func (m *MockLogger) Error(msg string, fields ...zap.Field)                  {}
-func (m *MockLogger) Fatal(msg string, fields ...zap.Field)                  {}
-func (m *MockLogger) With(fields ...zap.Field) logger.ILogger                { return m }
-func (m *MockLogger) Sync() error                                            { return nil }
-func (m *MockLogger) GetZapLogger() *zap.Logger                              { return zap.NewNop() }
+func (m *MockLogger) Debug(msg string, fields ...zap.Field)   {}
+func (m *MockLogger) Info(msg string, fields ...zap.Field)    {}
+func (m *MockLogger) Warn(msg string, fields ...zap.Field)    {}
+func (m *MockLogger) Error(msg string, fields ...zap.Field)   {}
+func (m *MockLogger) Fatal(msg string, fields ...zap.Field)   {}
+func (m *MockLogger) With(fields ...zap.Field) logger.ILogger { return m }
+func (m *MockLogger) Sync() error                             { return nil }
+func (m *MockLogger) GetZapLogger() *zap.Logger               { return zap.NewNop() }
 
 func TestNewKafkaConsumer(t *testing.T) {
 	mockES := new(MockElasticsearchClient)
@@ -107,4 +132,3 @@ func TestInfrastructureEvent_Structure(t *testing.T) {
 	assert.NotEmpty(t, event.Timestamp)
 	assert.NotNil(t, event.Metadata)
 }
-

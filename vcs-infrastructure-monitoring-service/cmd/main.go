@@ -9,9 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/docker/docker/client"
-	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	httpHandler "github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/api/http"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/infrastructures/elasticsearch"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/infrastructures/kafka"
@@ -19,6 +16,9 @@ import (
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/pkg/env"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/pkg/logger"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/usecases/services"
+	"github.com/docker/docker/client"
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -72,8 +72,10 @@ func main() {
 	}
 
 	metricsService := services.NewMetricsService(esClient, logger)
+	uptimeService := services.NewUptimeService(esClient, logger)
 
 	monitoringHandler := httpHandler.NewMonitoringHandler(metricsService, redisClient)
+	uptimeHandler := httpHandler.NewUptimeHandler(uptimeService)
 
 	r := gin.Default()
 
@@ -83,6 +85,7 @@ func main() {
 
 	apiV1 := r.Group("/api/v1")
 	monitoringHandler.RegisterRoutes(apiV1)
+	uptimeHandler.RegisterRoutes(apiV1)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -108,4 +111,3 @@ func main() {
 		log.Fatalf("Failed to run service: %v", err)
 	}
 }
-
