@@ -193,7 +193,8 @@ func (s *autoDeployService) buildClickHouseTablesFromEnv(env map[string]string) 
 				{Name: "matched_value", Type: "String"},
 				{Name: "score", Type: "Float64"},
 			},
-			OrderBy: []string{"matched_at", "id"},
+			OrderBy:     []string{"matched_at", "id"},
+			PartitionBy: "toYYYYMM(matched_at)",
 		})
 		s.logger.Info("Adding MATCHING_TABLE", zap.String("table", matchingTable))
 	}
@@ -214,7 +215,8 @@ func (s *autoDeployService) buildClickHouseTablesFromEnv(env map[string]string) 
 				{Name: "created_at", Type: "DateTime", DefaultValue: "now()"},
 				{Name: "status", Type: "String", DefaultValue: "'open'"},
 			},
-			OrderBy: []string{"created_at", "id"},
+			OrderBy:     []string{"created_at", "id"},
+			PartitionBy: "toYYYYMM(created_at)",
 		})
 		s.logger.Info("Adding ALERT_TABLE", zap.String("table", alertTable))
 	}

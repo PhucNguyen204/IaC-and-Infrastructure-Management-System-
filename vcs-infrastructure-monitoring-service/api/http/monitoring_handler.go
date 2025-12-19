@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/dto"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/usecases/services"
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 type MonitoringHandler struct {
@@ -38,7 +38,10 @@ func (h *MonitoringHandler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *MonitoringHandler) GetCurrentMetrics(c *gin.Context) {
 	instanceID := c.Param("instance_id")
 
-	metrics, err := h.metricsService.GetCurrentMetrics(c.Request.Context(), instanceID)
+	// Try to resolve container ID from Redis if instanceID is an infra/cluster ID
+	resolvedID := h.resolveContainerID(c.Request.Context(), instanceID)
+
+	metrics, err := h.metricsService.GetCurrentMetrics(c.Request.Context(), resolvedID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.APIResponse{
 			Success: false,
@@ -62,7 +65,8 @@ func (h *MonitoringHandler) GetHistoricalMetrics(c *gin.Context) {
 	from, _ := strconv.Atoi(c.DefaultQuery("from", "0"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "100"))
 
-	metrics, err := h.metricsService.GetHistoricalMetrics(c.Request.Context(), instanceID, from, size)
+	resolvedID := h.resolveContainerID(c.Request.Context(), instanceID)
+	metrics, err := h.metricsService.GetHistoricalMetrics(c.Request.Context(), resolvedID, from, size)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.APIResponse{
 			Success: false,
@@ -86,7 +90,8 @@ func (h *MonitoringHandler) GetLogs(c *gin.Context) {
 	from, _ := strconv.Atoi(c.DefaultQuery("from", "0"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "100"))
 
-	logs, err := h.metricsService.GetLogs(c.Request.Context(), instanceID, from, size)
+	resolvedID := h.resolveContainerID(c.Request.Context(), instanceID)
+	logs, err := h.metricsService.GetLogs(c.Request.Context(), resolvedID, from, size)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.APIResponse{
 			Success: false,
@@ -134,7 +139,8 @@ func (h *MonitoringHandler) GetAggregatedMetrics(c *gin.Context) {
 	instanceID := c.Param("instance_id")
 	timeRange := c.DefaultQuery("range", "1h")
 
-	metrics, err := h.metricsService.AggregateMetrics(c.Request.Context(), instanceID, timeRange)
+	resolvedID := h.resolveContainerID(c.Request.Context(), instanceID)
+	metrics, err := h.metricsService.AggregateMetrics(c.Request.Context(), resolvedID, timeRange)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.APIResponse{
 			Success: false,
@@ -195,3 +201,20 @@ func (h *MonitoringHandler) ListInfrastructure(c *gin.Context) {
 	})
 }
 
+// resolveContainerID tries to resolve an infra/cluster ID to its actual container ID
+// by looking up in Redis. If not found, returns the original ID (assuming it's already a container ID)
+func (h *MonitoringHandler) resolveContainerID(ctx context.Context, instanceID string) string {
+	if h.redisClient == nil {
+		return instanceID
+	}
+
+	// Try to find container ID from Redis using infra:container:{instanceID} key
+	containerKey := "infra:container:" + instanceID
+	containerID, err := h.redisClient.Get(ctx, containerKey).Result()
+	if err == nil && containerID != "" {
+		return containerID
+	}
+
+	// Not found, assume instanceID is already a container ID
+	return instanceID
+}

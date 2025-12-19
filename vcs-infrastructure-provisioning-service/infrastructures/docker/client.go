@@ -51,6 +51,7 @@ type ContainerConfig struct {
 	Cmd          []string
 	Resources    ResourceConfig
 	Privileged   bool // For Docker-in-Docker containers
+	Labels       map[string]string
 }
 
 type ResourceConfig struct {
@@ -117,6 +118,7 @@ func (ds *dockerService) CreateContainer(ctx context.Context, config ContainerCo
 		Env:          config.Env,
 		ExposedPorts: exposedPorts,
 		Cmd:          config.Cmd,
+		Labels:       config.Labels,
 	}
 
 	hostConfig := &container.HostConfig{
@@ -189,6 +191,7 @@ func (ds *dockerService) CreateDinDContainer(ctx context.Context, config Contain
 		Env:          config.Env,
 		ExposedPorts: exposedPorts,
 		Cmd:          config.Cmd,
+		Labels:       config.Labels,
 	}
 
 	// DinD requires privileged mode and specific security options

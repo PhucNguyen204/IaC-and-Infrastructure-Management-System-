@@ -20,6 +20,10 @@ type ICacheService interface {
 	InvalidateCluster(ctx context.Context, clusterID string) error
 	InvalidateClusterInfo(ctx context.Context, clusterID string) error
 	IsAvailable() bool
+	// Monitoring integration
+	RegisterContainerForMonitoring(ctx context.Context, infraID, containerID string) error
+	UnregisterContainerFromMonitoring(ctx context.Context, infraID string) error
+	GetRedisClient() *redis.Client
 }
 
 type cacheService struct {
@@ -164,4 +168,41 @@ func (s *cacheService) InvalidateClusterInfo(ctx context.Context, clusterID stri
 
 	key := fmt.Sprintf("cluster:info:%s", clusterID)
 	return s.redis.Del(ctx, key).Err()
+}
+
+// RegisterContainerForMonitoring registers a container for monitoring service to collect metrics
+func (s *cacheService) RegisterContainerForMonitoring(ctx context.Context, infraID, containerID string) error {
+	if !s.IsAvailable() {
+		return nil
+	}
+
+	// Set infra:container:{infraID} -> containerID (used by monitoring service to find containers)
+	containerKey := fmt.Sprintf("infra:container:%s", infraID)
+	if err := s.redis.Set(ctx, containerKey, containerID, 0).Err(); err != nil {
+		return err
+	}
+
+	// Set initial status as healthy
+	statusKey := fmt.Sprintf("infra:status:%s", containerID)
+	return s.redis.Set(ctx, statusKey, "healthy", time.Hour).Err()
+}
+
+// UnregisterContainerFromMonitoring removes a container from monitoring
+func (s *cacheService) UnregisterContainerFromMonitoring(ctx context.Context, infraID string) error {
+	if !s.IsAvailable() {
+		return nil
+	}
+
+	containerKey := fmt.Sprintf("infra:container:%s", infraID)
+	containerID, err := s.redis.Get(ctx, containerKey).Result()
+	if err == nil && containerID != "" {
+		statusKey := fmt.Sprintf("infra:status:%s", containerID)
+		s.redis.Del(ctx, statusKey)
+	}
+	return s.redis.Del(ctx, containerKey).Err()
+}
+
+// GetRedisClient returns the underlying Redis client
+func (s *cacheService) GetRedisClient() *redis.Client {
+	return s.redis
 }

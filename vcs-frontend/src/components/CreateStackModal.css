@@ -1,4 +1,5 @@
-.create-stack-modal {
+.create-stack-modal,
+.create-infrastructure-modal {
   width: 95%;
   max-width: 800px;
   max-height: 90vh;
@@ -85,6 +86,7 @@
 }
 
 @media (max-width: 640px) {
+
   .config-grid,
   .config-grid-3 {
     grid-template-columns: 1fr;
@@ -400,24 +402,30 @@
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Scrollbar styling */
-.create-stack-modal::-webkit-scrollbar {
+.create-stack-modal::-webkit-scrollbar,
+.create-infrastructure-modal::-webkit-scrollbar {
   width: 8px;
 }
 
-.create-stack-modal::-webkit-scrollbar-track {
+.create-stack-modal::-webkit-scrollbar-track,
+.create-infrastructure-modal::-webkit-scrollbar-track {
   background: #f1f5f9;
 }
 
-.create-stack-modal::-webkit-scrollbar-thumb {
+.create-stack-modal::-webkit-scrollbar-thumb,
+.create-infrastructure-modal::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 10px;
 }
 
-.create-stack-modal::-webkit-scrollbar-thumb:hover {
+.create-stack-modal::-webkit-scrollbar-thumb:hover,
+.create-infrastructure-modal::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
 

@@ -1,0 +1,19 @@
+- id: RULE-E2E-ERROR
+  name: Detect Error Logs
+  description: Match generic error or failure messages for integration checks
+  severity: high
+  keywords:
+    - error
+    - failed
+    - exception
+  enabled: true
+
+- id: RULE-E2E-NETWORK
+  name: Detect Network Issues
+  description: Catch connectivity problems reported by services
+  severity: medium
+  keywords:
+    - connection refused
+    - timeout
+    - unreachable
+  enabled: true

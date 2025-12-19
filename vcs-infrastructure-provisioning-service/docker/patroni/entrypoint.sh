@@ -203,11 +203,10 @@ postgresql:
   parameters:
     unix_socket_directories: '/var/run/postgresql'
   create_replica_methods:
-    - custom_basebackup
-  custom_basebackup:
-    command: /tmp/custom_basebackup.sh
-    keep_data: True
-    no_params: True
+    - basebackup
+  basebackup:
+    checkpoint: fast
+    max-rate: 100M
   callbacks:
     on_role_change: /tmp/on_role_change.sh
     on_start: /tmp/fix_permissions.sh
@@ -241,19 +240,31 @@ set -e
 export PGPASSWORD="${REPLICATION_PASSWORD:-replicator_pass}"
 
 echo "Creating replica using pg_basebackup..."
-echo "Master: \${PATRONI_MASTER_CONNECT_ADDRESS}"
-echo "Cloning from host: \${PATRONI_MASTER_HOST}"
+echo "Master connect address: \${PATRONI_MASTER_CONNECT_ADDRESS}"
+
+# Extract hostname from PATRONI_MASTER_CONNECT_ADDRESS (format: hostname:port)
+# PATRONI_MASTER_HOST may not be set, so we extract from connect address
+if [ -n "\${PATRONI_MASTER_CONNECT_ADDRESS}" ]; then
+  MASTER_HOST=\$(echo "\${PATRONI_MASTER_CONNECT_ADDRESS}" | cut -d: -f1)
+  MASTER_PORT=\$(echo "\${PATRONI_MASTER_CONNECT_ADDRESS}" | cut -d: -f2)
+else
+  echo "ERROR: PATRONI_MASTER_CONNECT_ADDRESS is not set!"
+  exit 1
+fi
+
+echo "Cloning from host: \${MASTER_HOST}:\${MASTER_PORT:-5432}"
 
 # Clean data directory if exists
 if [ -d "\${PGDATA}" ]; then
   echo "Cleaning \${PGDATA}..."
-  rm -rf "\${PGDATA}"/*
+  rm -rf "\${PGDATA}"/* 2>/dev/null || true
+  rm -rf "\${PGDATA}"/.[!.]* 2>/dev/null || true
 fi
 
 # Run pg_basebackup with password from environment
 /usr/lib/postgresql/17/bin/pg_basebackup \\
-  -h "\${PATRONI_MASTER_HOST:-patroni-node-1}" \\
-  -p 5432 \\
+  -h "\${MASTER_HOST}" \\
+  -p "\${MASTER_PORT:-5432}" \\
   -U replicator \\
   -D "\${PGDATA}" \\
   -X stream \\

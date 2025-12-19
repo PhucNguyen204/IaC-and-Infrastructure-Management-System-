@@ -95,10 +95,21 @@ type ClusterInfoResponse struct {
 	DCSType      string   `json:"dcs_type,omitempty"`
 	DCSEndpoints []string `json:"dcs_endpoints,omitempty"`
 
+	ConnectionInfo *PostgresConnectionInfo `json:"connection_info,omitempty"`
+
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`
 	HAProxyPort       int    `json:"haproxy_port"`
 	MaxReplicationLag int64  `json:"max_replication_lag"`
+}
+
+// PostgresConnectionInfo consolidated connection details
+type PostgresConnectionInfo struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Database string `json:"database"`
+	SSLMode  string `json:"ssl_mode,omitempty"`
 }
 
 // ConnectionPoint represents connection endpoint (primary or replica)

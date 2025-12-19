@@ -461,6 +461,33 @@ export const stackAPI = {
     createAuthAxios().get(`${PROVISIONING_URL}/stacks/${id}/metrics?range=${timeRange}`),
 };
 
+// Auto Deploy API - Deploy containers with auto-created infrastructure
+export const deployAPI = {
+  // Deploy a container with auto-provisioned infrastructure
+  deploy: (data) => 
+    createAuthAxios().post(`${PROVISIONING_URL}/deploy`, data),
+  
+  // List all deployments
+  list: () => 
+    createAuthAxios().get(`${PROVISIONING_URL}/deploy`),
+  
+  // Get deployment by ID
+  getById: (id) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/deploy/${id}`),
+  
+  // Delete deployment and its infrastructure
+  delete: (id) => 
+    createAuthAxios().delete(`${PROVISIONING_URL}/deploy/${id}`),
+  
+  // Get deployment logs
+  getLogs: (id, lines = 100) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/deploy/${id}/logs?lines=${lines}`),
+  
+  // Health check for deployment
+  getHealth: (id) => 
+    createAuthAxios().get(`${PROVISIONING_URL}/deploy/${id}/health`),
+};
+
 // Monitoring API (Elasticsearch-based metrics & logs)
 export const monitoringAPI = {
   // Get current metrics for an instance
@@ -486,4 +513,8 @@ export const monitoringAPI = {
   // List all monitored infrastructure
   listInfrastructure: () => 
     createAuthAxios().get(`${MONITORING_URL}/monitoring/infrastructure`),
+
+  // Get uptime status
+  getUptime: (infraId, period = '24h') => 
+    createAuthAxios().get(`${MONITORING_URL}/uptime/${infraId}?period=${period}`),
 };

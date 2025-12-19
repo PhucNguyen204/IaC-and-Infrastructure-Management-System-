@@ -1335,19 +1335,32 @@ func (s *nginxClusterService) cleanup(ctx context.Context, cluster *entities.Ngi
 
 // helper func() to publish events to Kafka
 func (s *nginxClusterService) publishEvent(ctx context.Context, eventType, infraID, clusterID, status string) {
-	if s.kafkaProducer != nil {
-		event := kafka.InfrastructureEvent{
-			InstanceID: clusterID,
-			Type:       "nginx_cluster",
-			Action:     eventType,
-			Timestamp:  time.Now(),
-			Metadata: map[string]interface{}{
-				"infra_id": infraID,
-				"status":   status,
-			},
-		}
-		s.kafkaProducer.PublishEvent(ctx, event)
+	if s.kafkaProducer == nil {
+		return
 	}
+
+	// Get user_id from infrastructure
+	var userID, clusterName string
+	if cluster, err := s.clusterRepo.FindByID(clusterID); err == nil {
+		clusterName = cluster.ClusterName
+		if infra, err := s.infraRepo.FindByID(cluster.InfrastructureID); err == nil {
+			userID = infra.UserID
+		}
+	}
+
+	event := kafka.InfrastructureEvent{
+		InstanceID: clusterID,
+		UserID:     userID,
+		Type:       "nginx_cluster",
+		Action:     eventType,
+		Timestamp:  time.Now(),
+		Metadata: map[string]interface{}{
+			"infra_id":     infraID,
+			"status":       status,
+			"cluster_name": clusterName,
+		},
+	}
+	s.kafkaProducer.PublishEvent(ctx, event)
 }
 
 // helper func() to fincd suitable port

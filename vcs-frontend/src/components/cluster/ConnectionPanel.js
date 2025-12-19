@@ -31,8 +31,34 @@ const ConnectionPanel = ({ clusterId, clusterInfo }) => {
   const loadConnectionInfo = async () => {
     try {
       setLoading(true);
-      const response = await clusterAPI.getConnectionInfo(clusterId);
-      setConnectionInfo(response.data);
+      // Use getById instead of getConnectionInfo since that endpoint doesn't exist
+      const response = await clusterAPI.getById(clusterId);
+      const clusterData = response.data?.data || response.data;
+      
+      // Transform cluster info to connection info format
+      const transformedInfo = {
+        endpoints: {
+          write: {
+            host: clusterData.write_endpoint?.host || 'localhost',
+            port: clusterData.haproxy_port || clusterData.write_endpoint?.port || 5000,
+            description: 'Primary (Read/Write via HAProxy)'
+          },
+          read: {
+            host: clusterData.read_endpoints?.[0]?.host || 'localhost',
+            port: (clusterData.haproxy_port || 5000) + 1,
+            description: 'Replicas (Read-only via HAProxy)'
+          }
+        },
+        credentials: {
+          username: 'postgres',
+          database: 'postgres',
+          password: '********'
+        },
+        databases: ['postgres'],
+        connectionString: `postgresql://postgres:****@localhost:${clusterData.haproxy_port || 5000}/postgres`
+      };
+      
+      setConnectionInfo(transformedInfo);
     } catch (error) {
       console.error('Error loading connection info:', error);
       toast.error('Failed to load connection info');

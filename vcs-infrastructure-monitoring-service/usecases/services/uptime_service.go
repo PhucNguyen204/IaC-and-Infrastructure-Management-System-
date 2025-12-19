@@ -98,12 +98,28 @@ func (us *uptimeService) GetOverallUptimeSummary(ctx context.Context, from, to t
 	return us.calculateSummary(events, from, to)
 }
 
+// calculateUptime tính toán uptime cho một infrastructure trong khoảng thời gian [from, to]
+//
+// LOGIC ĐƠN GIẢN:
+// 1. Sắp xếp events theo thời gian
+// 2. Với mỗi event, tính thời gian từ event trước đến event hiện tại
+// 3. Nếu status trước đó là "up" -> cộng vào uptime, ngược lại cộng vào downtime
+// 4. Cuối cùng, tính thời gian từ event cuối đến "to"
+//
+// FIX BUGS:
+// - Bug #1: Thời gian từ "from" đến event đầu tiên giờ được tính (giả định down nếu chưa có status)
+// - Bug #2: Nếu không có event, trả về unknown (đúng behavior)
+// - Bug #3: Outage tracking hoạt động từ đầu period
 func (us *uptimeService) calculateUptime(events []elasticsearch.UptimeEvent, instanceID string, from, to time.Time) (*dto.UptimeResponse, error) {
+	// Tổng thời gian của period
+	totalPeriodSeconds := int64(to.Sub(from).Seconds())
+
+	// Không có events -> không biết trạng thái -> downtime = 100%
 	if len(events) == 0 {
 		return &dto.UptimeResponse{
 			InfrastructureID: instanceID,
 			TotalUptime:      0,
-			TotalDowntime:    int64(to.Sub(from).Seconds()),
+			TotalDowntime:    totalPeriodSeconds,
 			UptimePercent:    0,
 			CurrentStatus:    "unknown",
 			Period:           formatPeriod(from, to),
@@ -112,35 +128,31 @@ func (us *uptimeService) calculateUptime(events []elasticsearch.UptimeEvent, ins
 		}, nil
 	}
 
-	// Sort events by timestamp
+	// Sắp xếp events theo thời gian
 	sort.Slice(events, func(i, j int) bool {
 		return events[i].Timestamp.Before(events[j].Timestamp)
 	})
 
+	// Khởi tạo biến
 	var totalUptime int64
 	var totalDowntime int64
-	var currentStatus string
 	var statusHistory []dto.StatusChange
 	var outageEvents []dto.OutageEvent
-	var infraType, infraName, userID string
 
-	var lastEventTime time.Time
-	var lastStatus string
+	// Lấy thông tin infra từ event đầu tiên
+	infraType := events[0].Type
+	infraName := events[0].InstanceName
+	userID := events[0].UserID
+
+	// Bắt đầu từ thời điểm "from"
+	lastEventTime := from
+	lastStatus := "unknown" // Giả định ban đầu là unknown (sẽ tính vào downtime)
 	var outageStartTime time.Time
 	isInOutage := false
 
-	for i, event := range events {
-		// Get infra info from first event
-		if i == 0 {
-			infraType = event.Type
-			infraName = event.InstanceName
-			userID = event.UserID
-			lastEventTime = from
-			if event.Timestamp.Before(from) {
-				lastEventTime = event.Timestamp
-			}
-		}
-
+	// Duyệt qua từng event
+	for _, event := range events {
+		// Clamp eventTime vào trong khoảng [from, to]
 		eventTime := event.Timestamp
 		if eventTime.Before(from) {
 			eventTime = from
@@ -149,34 +161,39 @@ func (us *uptimeService) calculateUptime(events []elasticsearch.UptimeEvent, ins
 			eventTime = to
 		}
 
-		// Calculate duration since last event
+		// Tính thời gian từ event trước đến event hiện tại
 		duration := int64(eventTime.Sub(lastEventTime).Seconds())
 
-		// Determine if previous status was "up" or "down"
+		// Cộng vào uptime hoặc downtime dựa trên status TRƯỚC ĐÓ
 		if isStatusUp(lastStatus) {
 			totalUptime += duration
-		} else if lastStatus != "" {
+		} else {
+			// lastStatus là "unknown", "stopped", "failed", etc. -> downtime
 			totalDowntime += duration
 		}
 
-		// Track outages
+		// Xác định status mới từ event
 		newStatus := determineStatus(event.Action, event.Status)
+
+		// Theo dõi outages
 		if isStatusUp(lastStatus) && !isStatusUp(newStatus) {
-			// Started an outage
+			// Bắt đầu outage mới
 			isInOutage = true
 			outageStartTime = eventTime
-		} else if !isStatusUp(lastStatus) && isStatusUp(newStatus) && isInOutage {
-			// Ended an outage
-			outageEvents = append(outageEvents, dto.OutageEvent{
-				StartTime: outageStartTime.Format(time.RFC3339),
-				EndTime:   eventTime.Format(time.RFC3339),
-				Duration:  int64(eventTime.Sub(outageStartTime).Seconds()),
-				Reason:    lastStatus,
-			})
-			isInOutage = false
+		} else if !isStatusUp(lastStatus) && isStatusUp(newStatus) {
+			// Kết thúc outage (nếu có)
+			if isInOutage {
+				outageEvents = append(outageEvents, dto.OutageEvent{
+					StartTime: outageStartTime.Format(time.RFC3339),
+					EndTime:   eventTime.Format(time.RFC3339),
+					Duration:  int64(eventTime.Sub(outageStartTime).Seconds()),
+					Reason:    lastStatus,
+				})
+				isInOutage = false
+			}
 		}
 
-		// Record status change
+		// Ghi lại lịch sử thay đổi status
 		statusHistory = append(statusHistory, dto.StatusChange{
 			Timestamp:  event.Timestamp.Format(time.RFC3339),
 			FromStatus: lastStatus,
@@ -185,12 +202,12 @@ func (us *uptimeService) calculateUptime(events []elasticsearch.UptimeEvent, ins
 			Duration:   duration,
 		})
 
+		// Cập nhật cho vòng lặp tiếp theo
 		lastStatus = newStatus
 		lastEventTime = eventTime
-		currentStatus = newStatus
 	}
 
-	// Calculate remaining time until 'to'
+	// Tính thời gian còn lại từ event cuối đến "to"
 	remainingDuration := int64(to.Sub(lastEventTime).Seconds())
 	if isStatusUp(lastStatus) {
 		totalUptime += remainingDuration
@@ -198,7 +215,7 @@ func (us *uptimeService) calculateUptime(events []elasticsearch.UptimeEvent, ins
 		totalDowntime += remainingDuration
 	}
 
-	// Close any open outage
+	// Đóng outage nếu còn đang mở
 	if isInOutage {
 		outageEvents = append(outageEvents, dto.OutageEvent{
 			StartTime: outageStartTime.Format(time.RFC3339),
@@ -208,11 +225,11 @@ func (us *uptimeService) calculateUptime(events []elasticsearch.UptimeEvent, ins
 		})
 	}
 
-	// Calculate uptime percentage
-	totalPeriod := totalUptime + totalDowntime
+	// Tính phần trăm uptime
+	// FIX: Sử dụng totalPeriodSeconds để đảm bảo đúng tổng thời gian
 	var uptimePercent float64
-	if totalPeriod > 0 {
-		uptimePercent = float64(totalUptime) / float64(totalPeriod) * 100
+	if totalPeriodSeconds > 0 {
+		uptimePercent = float64(totalUptime) / float64(totalPeriodSeconds) * 100
 	}
 
 	return &dto.UptimeResponse{
@@ -223,7 +240,7 @@ func (us *uptimeService) calculateUptime(events []elasticsearch.UptimeEvent, ins
 		TotalUptime:        totalUptime,
 		TotalDowntime:      totalDowntime,
 		UptimePercent:      uptimePercent,
-		CurrentStatus:      currentStatus,
+		CurrentStatus:      lastStatus,
 		Period:             formatPeriod(from, to),
 		From:               from.Format(time.RFC3339),
 		To:                 to.Format(time.RFC3339),

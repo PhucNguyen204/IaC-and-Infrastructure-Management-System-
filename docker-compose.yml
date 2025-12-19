@@ -183,7 +183,7 @@ services:
       REDIS_DB: 0
       KAFKA_BROKERS: kafka:9092
       KAFKA_GROUP_ID: monitoring-consumer-group
-      KAFKA_TOPICS: postgres.created,postgres.started,postgres.stopped,postgres.deleted,postgres.restarted,postgres.backup,postgres.restore,nginx.created,nginx.started,nginx.stopped,nginx.deleted,nginx.restarted,nginx.backup,nginx.restore
+      KAFKA_TOPICS: infrastructure.events,postgres.created,postgres.started,postgres.stopped,postgres.deleted,postgres.restarted,postgres.backup,postgres.restore,nginx.created,nginx.started,nginx.stopped,nginx.deleted,nginx.restarted,nginx.backup,nginx.restore
       ELASTICSEARCH_ADDRESSES: http://elasticsearch:9200
       ELASTICSEARCH_USERNAME: ""
       ELASTICSEARCH_PASSWORD: ""
@@ -203,6 +203,40 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./vcs-infrastructure-monitoring-service/logs:/app/logs
+
+  healthcheck-service:
+    build:
+      context: ./vcs-healthcheck-service
+      dockerfile: Dockerfile
+    container_name: iaas-healthcheck-service
+    ports:
+      - "8085:8085"
+    environment:
+      HTTP_PORT: 8085
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: healthcheck-service
+      KAFKA_TOPICS: infrastructure.events
+      ES_ADDRESSES: http://elasticsearch:9200
+      ES_USERNAME: ""
+      ES_PASSWORD: ""
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 2
+      LOG_LEVEL: info
+      LOG_FILE_PATH: ./logs/healthcheck.log
+      LOG_MAX_SIZE: 100
+      LOG_MAX_AGE: 10
+      LOG_MAX_BACKUPS: 30
+    depends_on:
+      - kafka
+      - elasticsearch
+      - redis
+    networks:
+      - iaas-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./vcs-healthcheck-service/logs:/app/logs
 
 networks:
   iaas-network:

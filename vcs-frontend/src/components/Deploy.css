@@ -1,0 +1,665 @@
+.deploy-page {
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.deploy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.deploy-header .header-info h1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin: 0;
+}
+
+.deploy-header .header-info p {
+  color: #666;
+  margin: 4px 0 0 40px;
+}
+
+.deploy-header .header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+/* Buttons */
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary {
+  background: #f0f0f5;
+  color: #333;
+}
+
+.btn-secondary:hover {
+  background: #e5e5ea;
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover {
+  background: #f0f0f5;
+}
+
+.btn-icon.danger:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.btn-icon.primary {
+  background: #667eea;
+  color: white;
+}
+
+.btn-icon.primary:hover {
+  background: #5a67d8;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.deploy-modal {
+  background: white;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  font-size: 20px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: #666;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #333;
+}
+
+/* Form */
+.deploy-form {
+  padding: 24px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+/* Template Selector */
+.template-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.template-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 2px solid #eee;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.template-card:hover {
+  border-color: #667eea;
+  background: #f8f9ff;
+}
+
+.template-card.selected {
+  border-color: #667eea;
+  background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+.template-card svg {
+  color: #667eea;
+}
+
+.template-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.template-info strong {
+  font-size: 14px;
+  color: #333;
+}
+
+.template-info span {
+  font-size: 12px;
+  color: #666;
+}
+
+/* Environment Variables */
+.env-hint {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #92400e;
+}
+
+.hint-badge {
+  font-weight: 600;
+}
+
+.env-hint code {
+  background: #fef3c7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.env-vars-container {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.env-var-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.env-var-row.add-new {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #ddd;
+}
+
+.env-key {
+  font-family: monospace;
+  font-weight: 500;
+  background: white !important;
+}
+
+.env-value {
+  font-family: monospace;
+}
+
+/* Infrastructure Preview */
+.infra-preview {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.infra-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.infra-chip.clickhouse {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.infra-chip.postgresql {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+/* Form Actions */
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+/* Deployments Section */
+.deployments-section {
+  margin-top: 24px;
+}
+
+.deployments-section h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+  color: #333;
+}
+
+/* Loading & Empty States */
+.loading-state,
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  color: #666;
+}
+
+.loading-state svg,
+.empty-state svg {
+  color: #667eea;
+  margin-bottom: 16px;
+}
+
+.empty-state h3 {
+  margin: 0 0 8px;
+  color: #333;
+}
+
+.empty-state p {
+  margin: 0 0 20px;
+}
+
+/* Spin animation */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Deployments List */
+.deployments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.deployment-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.deployment-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.deployment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  cursor: pointer;
+}
+
+.deployment-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.deployment-info h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.deployment-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Status Badge */
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.status-running {
+  background: #d1fae5;
+  color: #059669;
+}
+
+.status-creating {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.status-failed {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.status-stopped {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.status-unknown {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+/* Deployment Details */
+.deployment-details {
+  padding: 0 20px 20px;
+  border-top: 1px solid #eee;
+  background: #fafafa;
+}
+
+.detail-section {
+  padding: 16px 0;
+}
+
+.detail-section:not(:last-child) {
+  border-bottom: 1px solid #eee;
+}
+
+.detail-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #666;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-item .label {
+  font-weight: 500;
+  color: #666;
+  min-width: 80px;
+}
+
+.detail-item .value {
+  color: #333;
+}
+
+.detail-item .endpoint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-item .endpoint a {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #667eea;
+  text-decoration: none;
+}
+
+.detail-item .endpoint a:hover {
+  text-decoration: underline;
+}
+
+.btn-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: #f0f0f5;
+  cursor: pointer;
+  color: #666;
+}
+
+.btn-copy:hover {
+  background: #e5e5ea;
+  color: #333;
+}
+
+/* Infrastructure List */
+.infra-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.infra-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.infra-type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.infra-type.clickhouse {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.infra-type.postgresql {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.infra-details {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+}
+
+.infra-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.infra-status {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.infra-status.running {
+  background: #d1fae5;
+  color: #059669;
+}
+
+.infra-endpoint {
+  font-family: monospace;
+  font-size: 12px;
+  color: #666;
+}
+
+/* Endpoints List */
+.endpoints-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.endpoint-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.endpoint-key {
+  font-weight: 500;
+  color: #666;
+  text-transform: uppercase;
+}
+
+.endpoint-url {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #667eea;
+  text-decoration: none;
+  font-family: monospace;
+}
+
+.endpoint-url:hover {
+  text-decoration: underline;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .deploy-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .template-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .env-var-row {
+    grid-template-columns: 1fr;
+  }
+}

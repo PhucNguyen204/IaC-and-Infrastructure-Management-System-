@@ -11,7 +11,14 @@ import {
 } from 'lucide-react';
 import './Layout.css';
 
-const Layout = ({ children, onLogout, activeTab = 'stacks' }) => {
+const Layout = ({ children, onLogout, activeTab = 'stacks', onNavigate }) => {
+  const handleNavClick = (e, tab) => {
+    e.preventDefault();
+    if (onNavigate) {
+      onNavigate(tab);
+    }
+  };
+
   return (
     <div className="layout">
       <header className="layout-header">
@@ -40,6 +47,7 @@ const Layout = ({ children, onLogout, activeTab = 'stacks' }) => {
             <a 
               href="#overview" 
               className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
+              onClick={(e) => handleNavClick(e, 'overview')}
             >
               <LayoutDashboard size={20} />
               <span>Overview</span>
@@ -47,6 +55,7 @@ const Layout = ({ children, onLogout, activeTab = 'stacks' }) => {
             <a 
               href="#stacks" 
               className={`nav-item ${activeTab === 'stacks' ? 'active' : ''}`}
+              onClick={(e) => handleNavClick(e, 'dashboard')}
             >
               <Package size={20} />
               <span>Stacks</span>
@@ -54,6 +63,7 @@ const Layout = ({ children, onLogout, activeTab = 'stacks' }) => {
             <a 
               href="#deploy" 
               className={`nav-item ${activeTab === 'deploy' ? 'active' : ''}`}
+              onClick={(e) => handleNavClick(e, 'deploy')}
             >
               <Rocket size={20} />
               <span>Deploy</span>
@@ -61,6 +71,7 @@ const Layout = ({ children, onLogout, activeTab = 'stacks' }) => {
             <a 
               href="#metrics" 
               className={`nav-item ${activeTab === 'metrics' ? 'active' : ''}`}
+              onClick={(e) => handleNavClick(e, 'metrics')}
             >
               <BarChart3 size={20} />
               <span>Metrics</span>
@@ -68,6 +79,7 @@ const Layout = ({ children, onLogout, activeTab = 'stacks' }) => {
             <a 
               href="#alerts" 
               className={`nav-item ${activeTab === 'alerts' ? 'active' : ''}`}
+              onClick={(e) => handleNavClick(e, 'alerts')}
             >
               <Bell size={20} />
               <span>Alerts</span>
@@ -75,6 +87,7 @@ const Layout = ({ children, onLogout, activeTab = 'stacks' }) => {
             <a 
               href="#settings" 
               className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+              onClick={(e) => handleNavClick(e, 'settings')}
             >
               <Settings size={20} />
               <span>Settings</span>

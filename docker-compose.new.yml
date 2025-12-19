@@ -1,0 +1,280 @@
+services:
+  # ============================================
+  # DATABASES & MESSAGING
+  # ============================================
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: iaas-postgres
+    environment:
+      POSTGRES_USER: iaas_user
+      POSTGRES_PASSWORD: iaas_password
+      POSTGRES_DB: iaas_metadata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - iaas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iaas_user -d iaas_metadata"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: iaas-redis
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - iaas-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Kafka with KRaft mode (no Zookeeper needed)
+  kafka:
+    image: bitnami/kafka:3.6
+    container_name: iaas-kafka
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      # KRaft mode settings
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Performance tuning
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_CFG_LOG_RETENTION_HOURS: 168  # 7 days
+      KAFKA_CFG_LOG_SEGMENT_BYTES: 1073741824  # 1GB
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka_data:/bitnami/kafka
+    networks:
+      - iaas-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: iaas-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - cluster.name=iaas-cluster
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - iaas-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # APPLICATION SERVICES
+  # ============================================
+
+  authentication-service:
+    build:
+      context: ./vcs-authentication-service
+      dockerfile: Dockerfile
+    container_name: iaas-auth-service
+    ports:
+      - "8082:8082"
+    environment:
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: iaas_user
+      POSTGRES_PASSWORD: iaas_password
+      POSTGRES_USER_DB: iaas_metadata
+      # Redis (for session/rate limiting only)
+      REDIS_ADDRESS: redis:6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 0
+      # Security
+      JWT_SECRET_KEY: ${JWT_SECRET:-my-super-secret-jwt-key-for-iaas-system-2024}
+      # Logging
+      ZAP_LEVEL: info
+      ZAP_FILEPATH: ./logs/auth.log
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - iaas-network
+    volumes:
+      - ./vcs-authentication-service/logs:/app/logs
+    restart: unless-stopped
+
+  provisioning-service:
+    build:
+      context: ./vcs-infrastructure-provisioning-service
+      dockerfile: Dockerfile
+    container_name: iaas-provisioning-service
+    ports:
+      - "8083:8083"
+      - "50051:50051"
+    environment:
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: iaas_user
+      POSTGRES_PASSWORD: iaas_password
+      POSTGRES_DB: iaas_metadata
+      # Redis (for distributed locks only)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 1
+      # Kafka
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: infrastructure.lifecycle
+      # Server
+      HTTP_PORT: 8083
+      GRPC_PORT: 50051
+      # Security
+      JWT_SECRET: ${JWT_SECRET:-my-super-secret-jwt-key-for-iaas-system-2024}
+      # Docker
+      DOCKER_HOST: unix:///var/run/docker.sock
+      # Logging
+      LOG_LEVEL: info
+      LOG_FILE_PATH: ./logs/provisioning.log
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./vcs-infrastructure-provisioning-service/logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    privileged: true
+    networks:
+      - iaas-network
+    restart: unless-stopped
+
+  healthcheck-service:
+    build:
+      context: ./vcs-healthcheck-service
+      dockerfile: Dockerfile
+    container_name: iaas-healthcheck-service
+    ports:
+      - "8085:8085"
+    environment:
+      # Kafka
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: healthcheck-consumer
+      KAFKA_TOPICS: infrastructure.lifecycle
+      # Elasticsearch
+      ES_ADDRESSES: http://elasticsearch:9200
+      ES_USERNAME: ""
+      ES_PASSWORD: ""
+      # Redis (for distributed locks)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 2
+      # Server
+      HTTP_PORT: 8085
+      # Logging
+      LOG_LEVEL: info
+      LOG_FILE_PATH: ./logs/healthcheck.log
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./vcs-healthcheck-service/logs:/app/logs
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - iaas-network
+    restart: unless-stopped
+
+  monitoring-service:
+    build:
+      context: ./vcs-infrastructure-monitoring-service
+      dockerfile: Dockerfile
+    container_name: iaas-monitoring-service
+    ports:
+      - "8084:8084"
+    environment:
+      # Database (for infrastructure metadata queries)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: iaas_user
+      POSTGRES_PASSWORD: iaas_password
+      POSTGRES_DB: iaas_metadata
+      # Elasticsearch (primary data source)
+      ELASTICSEARCH_ADDRESSES: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: ""
+      ELASTICSEARCH_PASSWORD: ""
+      # Redis (for caching dashboard data)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 3
+      # Server
+      HTTP_PORT: 8084
+      # Logging
+      LOG_LEVEL: info
+      LOG_FILE_PATH: ./logs/monitoring.log
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - iaas-network
+    volumes:
+      - ./vcs-infrastructure-monitoring-service/logs:/app/logs
+    restart: unless-stopped
+
+networks:
+  iaas-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  elasticsearch_data:

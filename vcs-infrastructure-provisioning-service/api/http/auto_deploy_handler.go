@@ -10,13 +10,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AutoDeployHandler handles auto-deploy API endpoints
 type AutoDeployHandler struct {
 	service services.IAutoDeployService
 	logger  logger.ILogger
 }
 
-// NewAutoDeployHandler creates new handler
 func NewAutoDeployHandler(service services.IAutoDeployService, logger logger.ILogger) *AutoDeployHandler {
 	return &AutoDeployHandler{
 		service: service,
@@ -24,7 +22,6 @@ func NewAutoDeployHandler(service services.IAutoDeployService, logger logger.ILo
 	}
 }
 
-// RegisterRoutes registers auto-deploy routes
 func (h *AutoDeployHandler) RegisterRoutes(r *gin.RouterGroup) {
 	deploy := r.Group("/deploy")
 	{
@@ -37,35 +34,7 @@ func (h *AutoDeployHandler) RegisterRoutes(r *gin.RouterGroup) {
 	}
 }
 
-// Deploy godoc
-// @Summary Auto-deploy container with infrastructure
-// @Description Automatically analyze environment config and create required infrastructure, then deploy the container
-// @Tags Auto Deploy
-// @Accept json
-// @Produce json
-// @Param request body dto.AutoDeployRequest true "Deploy request with image and environment config"
-// @Success 201 {object} dto.AutoDeployResponse
-// @Failure 400 {object} dto.APIResponse
-// @Failure 500 {object} dto.APIResponse
-// @Router /api/v1/deploy [post]
-// @Example request
-//
-//	{
-//	  "name": "my-detection-app",
-//	  "image": "iaas-detection-engine:1.0",
-//	  "environment": {
-//	    "DB_HOST": "clickhouse",
-//	    "DB_PORT": "9000",
-//	    "DB_NAME": "detection_db",
-//	    "LOG_LEVEL": "info"
-//	  },
-//	  "volumes": [
-//	    {"host_path": "/data/rules", "container_path": "/opt/rules_storage"}
-//	  ],
-//	  "exposed_port": 8000,
-//	  "cpu": 1,
-//	  "memory": 512
-//	}
+
 func (h *AutoDeployHandler) Deploy(c *gin.Context) {
 	var req dto.AutoDeployRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -78,7 +47,6 @@ func (h *AutoDeployHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	// Validate required fields
 	if req.Image == "" {
 		c.JSON(http.StatusBadRequest, dto.APIResponse{
 			Success: false,

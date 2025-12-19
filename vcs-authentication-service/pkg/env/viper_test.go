@@ -16,19 +16,19 @@ func TestViperSuite(t *testing.T) {
 }
 
 func (suite *ViperSuite) SetupTest() {
-	envVars := []string{
-		"JWT_SECRET_KEY",
-		"POSTGRES_USER",
-		"POSTGRES_PASSWORD",
-		"POSTGRES_USER_DB",
-		"REDIS_ADDRESS",
-		"REDIS_PASSWORD",
-		"REDIS_DB",
-		"ZAP_LEVEL",
-		"ZAP_FILEPATH",
-		"ZAP_MAXSIZE",
-		"ZAP_MAXAGE",
-		"ZAP_MAXBACKUPS",
+		envVars := []string{
+			"JWT_SECRET_KEY",
+			"POSTGRES_USER",
+			"POSTGRES_PASSWORD",
+			"POSTGRES_USER_DB",
+			"REDIS_ADDRESS",
+			"REDIS_PASSWORD",
+			"REDIS_DB",
+			"ZAP_LEVEL",
+			"ZAP_FILEPATH",
+			"ZAP_MAXSIZE",
+			"ZAP_MAXAGE",
+			"ZAP_MAXBACKUPS",
 	}
 
 	for _, env := range envVars {

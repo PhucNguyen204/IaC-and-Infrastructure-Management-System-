@@ -500,3 +500,220 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* Connection Card */
+.connection-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.conn-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+}
+
+.conn-label {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.conn-value {
+  font-family: monospace;
+  color: #0f172a;
+  background: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+  width: fit-content;
+}
+
+.conn-string {
+  margin-top: 8px;
+  grid-column: 1 / -1;
+}
+
+.conn-box {
+  display: flex;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.conn-box code {
+  color: #334155;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 8px;
+}
+
+/* Metrics Section */
+.metrics-list-section {
+  padding: 0;
+}
+
+.metrics-list-section h2 {
+  margin-bottom: 20px;
+  font-size: 18px;
+  color: #111827;
+}
+
+.metric-resource-card {
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 24px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.metric-card-header {
+  background: #f9fafb;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.metrics-container {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* Uptime Card */
+.uptime-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.uptime-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.uptime-header h4 {
+  margin: 0;
+  color: #4b5563;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.uptime-status {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 14px;
+}
+.uptime-status.good { background: #dcfce7; color: #15803d; }
+.uptime-status.warning { background: #fef3c7; color: #b45309; }
+
+.uptime-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 24px;
+  text-align: center;
+}
+
+.u-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.u-item .label {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #6b7280;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.u-item .val {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* Chart */
+.chart-section h4, .analysis-table-section h4 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.chart-wrapper {
+  background: white; 
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px 10px 10px 0;
+}
+
+/* Metrics Table */
+.analysis-table-section {
+  overflow-x: auto;
+}
+
+.metrics-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.metrics-table th, .metrics-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.metrics-table th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #4b5563;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.metrics-table tr:last-child td {
+  border-bottom: none;
+}
+
+.metrics-table tr:hover {
+  background: #f9fafb;
+}
+
+.no-data {
+    padding: 40px;
+    text-align: center;
+    color: #9ca3af;
+    background: #f9fafb;
+    border-radius: 8px;
+    border: 1px dashed #d1d5db;
+}

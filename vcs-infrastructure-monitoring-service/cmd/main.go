@@ -17,6 +17,7 @@ import (
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/pkg/logger"
 	"github.com/PhucNguyen204/vcs-infrastructure-monitoring-service/usecases/services"
 	"github.com/docker/docker/client"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -78,6 +79,14 @@ func main() {
 	uptimeHandler := httpHandler.NewUptimeHandler(uptimeService)
 
 	r := gin.Default()
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001", "http://frontend.localhost"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})

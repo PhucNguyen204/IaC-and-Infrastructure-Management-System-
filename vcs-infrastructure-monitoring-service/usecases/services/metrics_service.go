@@ -226,4 +226,3 @@ func (ms *metricsService) AggregateMetrics(ctx context.Context, instanceID strin
 		DataPoints: len(metrics),
 	}, nil
 }
-

@@ -149,8 +149,8 @@ func (s *postgreSQLClusterService) CreateCluster(ctx context.Context, userID str
 		return nil, fmt.Errorf("failed to create cluster: %w", err)
 	}
 
-	// Create dedicated network
-	networkName := fmt.Sprintf("iaas-cluster-%s", clusterID)
+	// Create dedicated network with project-based naming for Docker Desktop grouping
+	networkName := fmt.Sprintf("pg-cluster-%s_default", req.ClusterName)
 	networkID, err := s.dockerSvc.CreateNetwork(ctx, networkName)
 	if err != nil {
 		s.updateInfraStatus(infraID, entities.StatusFailed)
@@ -160,47 +160,55 @@ func (s *postgreSQLClusterService) CreateCluster(ctx context.Context, userID str
 	cluster.NetworkID = networkID
 	s.clusterRepo.Update(cluster)
 
-	// Step 1: Create etcd cluster (3 nodes for HA)
-	s.logger.Info("creating etcd cluster for DCS")
-	etcdNodes, err := s.createEtcdCluster(ctx, cluster, req, networkName)
-	if err != nil {
+	// Step 1: Create a single etcd node for DCS (faster bootstrap)
+	s.logger.Info("creating single etcd node for DCS")
+	if _, err := s.createEtcdNode(ctx, cluster, req, networkName); err != nil {
 		s.cleanup(ctx, cluster, networkID)
-		return nil, fmt.Errorf("failed to create etcd cluster: %w", err)
+		return nil, fmt.Errorf("failed to create etcd node: %w", err)
 	}
 
-	// Wait for etcd cluster to be ready and healthy
-	s.logger.Info("waiting for etcd cluster to be ready", zap.Int("wait_seconds", 15))
-	time.Sleep(15 * time.Second) // Increased wait time for etcd cluster formation
+	// Short wait for etcd to become ready
+	s.logger.Info("waiting for etcd to be ready", zap.Int("wait_seconds", 5))
+	time.Sleep(5 * time.Second)
 
-	s.logger.Info("etcd cluster should be ready, proceeding with Patroni node creation")
+	s.logger.Info("etcd ready, proceeding with Patroni node creation")
 
 	// Step 2: Create Patroni nodes
 	s.logger.Info("creating Patroni PostgreSQL nodes")
 	patroniNodes := make([]*entities.ClusterNode, 0, req.NodeCount)
-	for i := 0; i < req.NodeCount; i++ {
-		isLeader := i == 0
-		node, err := s.createPatroniNode(ctx, cluster, req, i, networkName, etcdNodes[0], isLeader)
-		if err != nil {
-			s.logger.Error("failed to create patroni node", zap.Int("index", i), zap.Error(err))
-			s.cleanup(ctx, cluster, networkID)
-			return nil, fmt.Errorf("failed to create patroni node %d: %w", i, err)
-		}
-		patroniNodes = append(patroniNodes, node)
 
-		// Set primary node
-		if isLeader {
-			cluster.PrimaryNodeID = node.ID
-			s.clusterRepo.Update(cluster)
-		}
+	// Create primary first, wait for readiness
+	primaryNode, err := s.createPatroniNode(ctx, cluster, req, 0, networkName, true)
+	if err != nil {
+		s.logger.Error("failed to create patroni primary", zap.Error(err))
+		s.cleanup(ctx, cluster, networkID)
+		return nil, fmt.Errorf("failed to create patroni primary: %w", err)
+	}
+	cluster.PrimaryNodeID = primaryNode.ID
+	s.clusterRepo.Update(cluster)
 
-		if i < req.NodeCount-1 {
-			if i == 0 {
-				s.logger.Info("waiting for primary node to be ready before creating replicas", zap.Int("wait_seconds", 20))
-				time.Sleep(20 * time.Second)
-			} else {
-				s.logger.Info("waiting before creating next replica", zap.Int("wait_seconds", 15))
-				time.Sleep(15 * time.Second)
+	if err := s.waitForPatroniReady(ctx, primaryNode.ContainerID, 5*time.Minute); err != nil {
+		s.logger.Error("primary not ready in time", zap.Error(err))
+		s.cleanup(ctx, cluster, networkID)
+		return nil, err
+	}
+	patroniNodes = append(patroniNodes, primaryNode)
+
+	// Create replicas in parallel for speed
+	if req.NodeCount > 1 {
+		for i := 1; i < req.NodeCount; i++ {
+			node, nodeErr := s.createPatroniNode(ctx, cluster, req, i, networkName, false)
+			if nodeErr != nil {
+				s.logger.Error("failed to create replica", zap.Int("index", i), zap.Error(nodeErr))
+				s.cleanup(ctx, cluster, networkID)
+				return nil, fmt.Errorf("failed to create replica %d: %w", i, nodeErr)
 			}
+			if readyErr := s.waitForPatroniReady(ctx, node.ContainerID, 5*time.Minute); readyErr != nil {
+				s.logger.Error("replica not ready", zap.Int("index", i), zap.Error(readyErr))
+				s.cleanup(ctx, cluster, networkID)
+				return nil, fmt.Errorf("replica %d not ready: %w", i, readyErr)
+			}
+			patroniNodes = append(patroniNodes, node)
 		}
 	}
 
@@ -222,99 +230,91 @@ func (s *postgreSQLClusterService) CreateCluster(ctx context.Context, userID str
 	return s.GetClusterInfo(ctx, clusterID)
 }
 
-// createEtcdCluster creates a 3-node etcd cluster for DCS
-func (s *postgreSQLClusterService) createEtcdCluster(ctx context.Context, cluster *entities.PostgreSQLCluster, req dto.CreateClusterRequest, networkName string) ([]*entities.ClusterNode, error) {
-	etcdNodes := make([]*entities.ClusterNode, 0, 3)
+// createEtcdNode creates a single etcd node for DCS
+func (s *postgreSQLClusterService) createEtcdNode(ctx context.Context, cluster *entities.PostgreSQLCluster, req dto.CreateClusterRequest, networkName string) (*entities.ClusterNode, error) {
 	etcdClusterToken := fmt.Sprintf("pgcluster-%s", cluster.ID)
 
-	// Build initial cluster string
-	initialCluster := []string{
-		"etcd-1=http://etcd-1:2380",
-		"etcd-2=http://etcd-2:2380",
-		"etcd-3=http://etcd-3:2380",
-	}
-	initialClusterStr := strings.Join(initialCluster, ",")
+	shortID := cluster.ID[:8]
+	nodeID := uuid.New().String()
+	nodeName := "etcd"
+	// Project name for Docker Desktop grouping
+	projectName := fmt.Sprintf("pg-cluster-%s", req.ClusterName)
+	containerName := fmt.Sprintf("%s-etcd", projectName)
+	volumeName := fmt.Sprintf("pg-%s-etcd-data", shortID)
 
-	// Create 3 etcd nodes
-	for i := 1; i <= 3; i++ {
-		nodeID := uuid.New().String()
-		nodeName := fmt.Sprintf("etcd-%d", i)
-		containerName := fmt.Sprintf("iaas-etcd-%s-%s", cluster.ID, nodeName)
-		volumeName := fmt.Sprintf("iaas-etcd-data-%s-%s", cluster.ID, nodeName)
-
-		// Create volume
-		if err := s.dockerSvc.CreateVolume(ctx, volumeName); err != nil {
-			return nil, fmt.Errorf("failed to create etcd volume: %w", err)
-		}
-
-		initialState := "new"
-
-		// etcd configuration
-		config := docker.ContainerConfig{
-			Name:  containerName,
-			Image: "iaas-etcd:v3.5.11",
-			Env: []string{
-				fmt.Sprintf("ETCD_NAME=%s", nodeName),
-				fmt.Sprintf("ETCD_INITIAL_CLUSTER_TOKEN=%s", etcdClusterToken),
-				fmt.Sprintf("ETCD_INITIAL_CLUSTER_STATE=%s", initialState),
-				fmt.Sprintf("ETCD_INITIAL_CLUSTER=%s", initialClusterStr),
-				fmt.Sprintf("ETCD_INITIAL_ADVERTISE_PEER_URLS=http://%s:2380", nodeName),
-				"ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380",
-				fmt.Sprintf("ETCD_ADVERTISE_CLIENT_URLS=http://%s:2379", nodeName),
-				"ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379",
-			},
-			Ports:        map[string]string{"2379": "0", "2380": "0"},
-			Volumes:      map[string]string{volumeName: "/etcd-data"},
-			Network:      networkName,
-			NetworkAlias: nodeName,
-			Resources: docker.ResourceConfig{
-				CPULimit:    500000000, // 0.5 CPU
-				MemoryLimit: 536870912, // 512MB
-			},
-		}
-
-		containerID, err := s.dockerSvc.CreateContainer(ctx, config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create etcd container: %w", err)
-		}
-
-		if err := s.dockerSvc.StartContainer(ctx, containerID); err != nil {
-			return nil, fmt.Errorf("failed to start etcd container: %w", err)
-		}
-
-		node := &entities.ClusterNode{
-			ID:          nodeID,
-			ClusterID:   cluster.ID,
-			ContainerID: containerID,
-			Role:        "etcd",
-			Port:        2379,
-			VolumeID:    volumeName,
-			IsHealthy:   true,
-		}
-
-		if err := s.clusterRepo.CreateNode(node); err != nil {
-			return nil, err
-		}
-
-		etcdNodes = append(etcdNodes, node)
-		s.logger.Info("created etcd node", zap.String("name", nodeName))
-
-		// Wait between nodes for cluster formation
-		if i < 3 {
-			time.Sleep(3 * time.Second)
-		}
+	// Create volume
+	if err := s.dockerSvc.CreateVolume(ctx, volumeName); err != nil {
+		return nil, fmt.Errorf("failed to create etcd volume: %w", err)
 	}
 
-	return etcdNodes, nil
+	// etcd configuration for single-node setup
+	config := docker.ContainerConfig{
+		Name:  containerName,
+		Image: "etcd",
+		Env: []string{
+			fmt.Sprintf("ETCD_NAME=%s", nodeName),
+			fmt.Sprintf("ETCD_INITIAL_CLUSTER_TOKEN=%s", etcdClusterToken),
+			"ETCD_INITIAL_CLUSTER_STATE=new",
+			fmt.Sprintf("ETCD_INITIAL_CLUSTER=%s=http://%s:2380", nodeName, nodeName),
+			fmt.Sprintf("ETCD_INITIAL_ADVERTISE_PEER_URLS=http://%s:2380", nodeName),
+			"ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380",
+			fmt.Sprintf("ETCD_ADVERTISE_CLIENT_URLS=http://%s:2379", nodeName),
+			"ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379",
+		},
+		Ports:        map[string]string{"2379": "0", "2380": "0"},
+		Volumes:      map[string]string{volumeName: "/etcd-data"},
+		Network:      networkName,
+		NetworkAlias: nodeName,
+		Labels: map[string]string{
+			"cluster_id":                 cluster.ID,
+			"cluster_type":               "postgres_cluster",
+			"role":                       "etcd",
+			"com.docker.compose.project": projectName,
+			"com.docker.compose.service": "etcd",
+		},
+		Resources: docker.ResourceConfig{
+			CPULimit:    500000000, // 0.5 CPU
+			MemoryLimit: 536870912, // 512MB
+		},
+	}
+
+	containerID, err := s.dockerSvc.CreateContainer(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create etcd container: %w", err)
+	}
+
+	if err := s.dockerSvc.StartContainer(ctx, containerID); err != nil {
+		return nil, fmt.Errorf("failed to start etcd container: %w", err)
+	}
+
+	node := &entities.ClusterNode{
+		ID:          nodeID,
+		ClusterID:   cluster.ID,
+		ContainerID: containerID,
+		Role:        "etcd",
+		Port:        2379,
+		VolumeID:    volumeName,
+		IsHealthy:   true,
+	}
+
+	if err := s.clusterRepo.CreateNode(node); err != nil {
+		return nil, err
+	}
+
+	s.logger.Info("created etcd node", zap.String("name", nodeName))
+	return node, nil
 }
 
 // createPatroniNode creates a Patroni-managed PostgreSQL node
-func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluster *entities.PostgreSQLCluster, req dto.CreateClusterRequest, index int, networkName string, etcdNode *entities.ClusterNode, isLeader bool) (*entities.ClusterNode, error) {
+func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluster *entities.PostgreSQLCluster, req dto.CreateClusterRequest, index int, networkName string, isLeader bool) (*entities.ClusterNode, error) {
+	shortID := cluster.ID[:8]
 	nodeID := uuid.New().String()
-	nodeName := fmt.Sprintf("patroni-node-%d", index+1)
-	containerName := fmt.Sprintf("iaas-patroni-%s-%s", cluster.ID, nodeName)
-	volumeName := fmt.Sprintf("iaas-patroni-data-%s-%s", cluster.ID, nodeName)
-	backupVolumeName := fmt.Sprintf("iaas-pgbackrest-%s-%s", cluster.ID, nodeName)
+	// Project name for Docker Desktop grouping
+	projectName := fmt.Sprintf("pg-cluster-%s", req.ClusterName)
+	nodeName := fmt.Sprintf("%s-node%d", projectName, index+1)
+	containerName := nodeName
+	volumeName := fmt.Sprintf("pg-%s-data-%d", shortID, index+1)
+	backupVolumeName := fmt.Sprintf("pg-%s-backup-%d", shortID, index+1)
 
 	// Create volumes
 	if err := s.dockerSvc.CreateVolume(ctx, volumeName); err != nil {
@@ -356,7 +356,7 @@ func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluste
 		fmt.Sprintf("SCOPE=%s", req.ClusterName),
 		fmt.Sprintf("NAMESPACE=%s", req.Namespace),
 		fmt.Sprintf("PATRONI_NAME=%s", nodeName),
-		"ETCD_HOST=etcd-1:2379",
+		"ETCD_HOST=etcd:2379",
 		fmt.Sprintf("POSTGRES_PASSWORD=%s", req.PostgreSQLPassword),
 		"REPLICATION_PASSWORD=replicator_pass",
 		fmt.Sprintf("MAX_CONNECTIONS=%s", maxConnections),
@@ -381,9 +381,16 @@ func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluste
 		)
 	}
 
+	role := "replica"
+	serviceRole := "replica"
+	if isLeader {
+		role = "primary"
+		serviceRole = "primary"
+	}
+
 	config := docker.ContainerConfig{
 		Name:  containerName,
-		Image: "iaas-patroni-postgres:17", // Custom built image
+		Image: "postgre_db", // Short tag for Patroni-based PostgreSQL HA image
 		Env:   env,
 		Ports: map[string]string{"5432": "0", "8008": "0"},
 		Volumes: map[string]string{
@@ -392,6 +399,13 @@ func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluste
 		},
 		Network:      networkName,
 		NetworkAlias: nodeName,
+		Labels: map[string]string{
+			"cluster_id":                 cluster.ID,
+			"cluster_type":               "postgres_cluster",
+			"role":                       role,
+			"com.docker.compose.project": projectName,
+			"com.docker.compose.service": fmt.Sprintf("postgres-%s", serviceRole),
+		},
 		Resources: docker.ResourceConfig{
 			CPULimit:    req.CPUPerNode * 1000000000,     // Convert CPU cores to nanocores (1 core = 1e9 nanocores)
 			MemoryLimit: req.MemoryPerNode * 1024 * 1024, // Convert MB to bytes
@@ -405,11 +419,6 @@ func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluste
 
 	if err := s.dockerSvc.StartContainer(ctx, containerID); err != nil {
 		return nil, fmt.Errorf("failed to start patroni container: %w", err)
-	}
-
-	role := "replica"
-	if isLeader {
-		role = "primary"
 	}
 
 	node := &entities.ClusterNode{
@@ -426,34 +435,62 @@ func (s *postgreSQLClusterService) createPatroniNode(ctx context.Context, cluste
 		return nil, err
 	}
 
+	// Register container for monitoring service
+	s.cacheService.RegisterContainerForMonitoring(ctx, nodeID, containerID)
+
 	s.logger.Info("created patroni node", zap.String("name", nodeName), zap.String("role", role))
 	return node, nil
+}
+
+// waitForPatroniReady polls pg_isready inside the container until it accepts connections or timeout
+func (s *postgreSQLClusterService) waitForPatroniReady(ctx context.Context, containerID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		output, err := s.dockerSvc.ExecCommand(ctx, containerID, []string{"pg_isready", "-h", "localhost", "-p", "5432"})
+		if err == nil && strings.Contains(output, "accepting connections") {
+			return nil
+		}
+		time.Sleep(3 * time.Second)
+	}
+
+	return fmt.Errorf("patroni container %s not ready within %s", containerID, timeout)
 }
 
 // createHAProxyNode creates HAProxy load balancer for the cluster
 func (s *postgreSQLClusterService) createHAProxyNode(ctx context.Context, cluster *entities.PostgreSQLCluster, req dto.CreateClusterRequest, networkName string, patroniNodes []*entities.ClusterNode) (*entities.ClusterNode, error) {
 	nodeID := uuid.New().String()
-	containerName := fmt.Sprintf("iaas-haproxy-%s", cluster.ID)
+	// Project name for Docker Desktop grouping
+	projectName := fmt.Sprintf("pg-cluster-%s", req.ClusterName)
+	containerName := fmt.Sprintf("%s-haproxy", projectName)
 
-	// Build node list for HAProxy
+	// Build node list for HAProxy - use new naming convention
 	nodeNames := make([]string, 0, len(patroniNodes))
 	for i := range patroniNodes {
-		nodeNames = append(nodeNames, fmt.Sprintf("patroni-node-%d", i+1))
+		nodeNames = append(nodeNames, fmt.Sprintf("%s-node%d", projectName, i+1))
 	}
 
 	config := docker.ContainerConfig{
 		Name:  containerName,
-		Image: "iaas-haproxy:latest", // Custom built image
+		Image: "postgre_ha", // Short tag for HAProxy image used by PostgreSQL clusters
 		Env: []string{
 			fmt.Sprintf("PATRONI_NODES=%s", strings.Join(nodeNames, ",")),
 		},
 		Ports: map[string]string{
-			"5000": fmt.Sprintf("%d", req.HAProxyPort),
-			"5001": fmt.Sprintf("%d", req.HAProxyReadPort),
-			"7000": fmt.Sprintf("%d", req.HAProxyStatsPort),
+			// Use "0" to let Docker assign dynamic host ports
+			"5000": "0",
+			"5001": "0",
+			"7000": "0",
 		},
 		Network:      networkName,
-		NetworkAlias: "haproxy",
+		NetworkAlias: "proxy",
+		Labels: map[string]string{
+			"cluster_id":                 cluster.ID,
+			"cluster_type":               "postgres_cluster",
+			"role":                       "haproxy",
+			"com.docker.compose.project": projectName,
+			"com.docker.compose.service": "haproxy",
+		},
 		Resources: docker.ResourceConfig{
 			CPULimit:    500000000, // 0.5 CPU
 			MemoryLimit: 268435456, // 256MB
@@ -469,12 +506,39 @@ func (s *postgreSQLClusterService) createHAProxyNode(ctx context.Context, cluste
 		return nil, fmt.Errorf("failed to start haproxy container: %w", err)
 	}
 
+	// Get actual assigned ports from Docker after container starts
+	var assignedPrimaryPort, assignedReadPort, assignedStatsPort int
+	if containerInfo, inspectErr := s.dockerSvc.InspectContainer(ctx, containerID); inspectErr == nil {
+		if portBindings := containerInfo.NetworkSettings.Ports; portBindings != nil {
+			if bindings, ok := portBindings["5000/tcp"]; ok && len(bindings) > 0 {
+				if port, parseErr := strconv.Atoi(bindings[0].HostPort); parseErr == nil {
+					assignedPrimaryPort = port
+				}
+			}
+			if bindings, ok := portBindings["5001/tcp"]; ok && len(bindings) > 0 {
+				if port, parseErr := strconv.Atoi(bindings[0].HostPort); parseErr == nil {
+					assignedReadPort = port
+				}
+			}
+			if bindings, ok := portBindings["7000/tcp"]; ok && len(bindings) > 0 {
+				if port, parseErr := strconv.Atoi(bindings[0].HostPort); parseErr == nil {
+					assignedStatsPort = port
+				}
+			}
+		}
+	}
+
+	s.logger.Info("HAProxy ports assigned",
+		zap.Int("primary_port", assignedPrimaryPort),
+		zap.Int("read_port", assignedReadPort),
+		zap.Int("stats_port", assignedStatsPort))
+
 	node := &entities.ClusterNode{
 		ID:          nodeID,
 		ClusterID:   cluster.ID,
 		ContainerID: containerID,
 		Role:        "haproxy",
-		Port:        req.HAProxyPort,
+		Port:        assignedPrimaryPort,
 		IsHealthy:   true,
 	}
 
@@ -483,10 +547,10 @@ func (s *postgreSQLClusterService) createHAProxyNode(ctx context.Context, cluste
 	}
 
 	// Store HAProxy port in cluster
-	cluster.HAProxyPort = req.HAProxyPort
+	cluster.HAProxyPort = assignedPrimaryPort
 	s.clusterRepo.Update(cluster)
 
-	s.logger.Info("created HAProxy load balancer", zap.Int("primary_port", req.HAProxyPort), zap.Int("read_port", req.HAProxyReadPort))
+	s.logger.Info("created HAProxy load balancer", zap.Int("primary_port", assignedPrimaryPort), zap.Int("read_port", assignedReadPort))
 	return node, nil
 }
 
@@ -515,8 +579,42 @@ func (s *postgreSQLClusterService) cleanup(ctx context.Context, cluster *entitie
 }
 
 func (s *postgreSQLClusterService) publishEvent(ctx context.Context, eventType, infraID, clusterID, status string) {
-	// Kafka event publishing logic
-	s.logger.Info("publishing event", zap.String("type", eventType), zap.String("cluster_id", clusterID))
+	if s.kafkaProducer == nil {
+		return
+	}
+
+	// Get cluster info for user_id
+	cluster, _ := s.clusterRepo.FindByID(clusterID)
+	var userID string
+	if cluster != nil {
+		if infra, err := s.infraRepo.FindByID(cluster.InfrastructureID); err == nil {
+			userID = infra.UserID
+		}
+	}
+
+	event := kafka.InfrastructureEvent{
+		InstanceID: clusterID,
+		UserID:     userID,
+		Type:       "postgres_cluster",
+		Action:     eventType,
+		Timestamp:  time.Now(),
+		Metadata: map[string]interface{}{
+			"infra_id":     infraID,
+			"status":       status,
+			"cluster_name": cluster.ClusterName,
+		},
+	}
+
+	if err := s.kafkaProducer.PublishEvent(ctx, event); err != nil {
+		s.logger.Error("failed to publish event to kafka",
+			zap.String("cluster_id", clusterID),
+			zap.Error(err))
+	} else {
+		s.logger.Info("published event to kafka",
+			zap.String("type", eventType),
+			zap.String("cluster_id", clusterID),
+			zap.String("status", status))
+	}
 }
 
 // GetClusterInfo retrieves cluster information
@@ -574,6 +672,12 @@ func (s *postgreSQLClusterService) GetClusterInfo(ctx context.Context, clusterID
 		}
 	}
 
+	// Determine connection port (prefer HAProxy)
+	connPort := writeEndpoint.Port
+	if cluster.HAProxyPort > 0 {
+		connPort = cluster.HAProxyPort
+	}
+
 	response := &dto.ClusterInfoResponse{
 		ClusterID:         cluster.ID,
 		InfrastructureID:  cluster.InfrastructureID,
@@ -585,8 +689,15 @@ func (s *postgreSQLClusterService) GetClusterInfo(ctx context.Context, clusterID
 		ReadEndpoints:     readEndpoints,
 		HAProxyPort:       cluster.HAProxyPort,
 		Nodes:             nodeInfos,
-		CreatedAt:         cluster.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:         cluster.UpdatedAt.Format(time.RFC3339),
+		ConnectionInfo: &dto.PostgresConnectionInfo{
+			Host:     writeEndpoint.Host,
+			Port:     connPort,
+			Username: cluster.Username,
+			Database: cluster.DatabaseName,
+			SSLMode:  "disable",
+		},
+		CreatedAt: cluster.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: cluster.UpdatedAt.Format(time.RFC3339),
 	}
 
 	s.cacheService.SetClusterInfo(ctx, clusterID, response, 5*time.Minute)
@@ -715,9 +826,97 @@ func (s *postgreSQLClusterService) DeleteCluster(ctx context.Context, clusterID 
 	return nil
 }
 
-// ScaleCluster - not yet implemented for Patroni
+// ScaleCluster scales the cluster to the desired node count
 func (s *postgreSQLClusterService) ScaleCluster(ctx context.Context, clusterID string, req dto.ScaleClusterRequest) error {
-	return fmt.Errorf("scaling not yet implemented for Patroni clusters - use AddNode/RemoveNode instead")
+	s.logger.Info("scaling cluster", zap.String("cluster_id", clusterID), zap.Int("target_nodes", req.NodeCount))
+
+	if req.NodeCount < 1 {
+		return fmt.Errorf("node_count must be at least 1")
+	}
+	if req.NodeCount > 10 {
+		return fmt.Errorf("node_count cannot exceed 10")
+	}
+
+	// Get current nodes
+	nodes, err := s.clusterRepo.ListNodes(clusterID)
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	// Count Patroni nodes (excluding etcd, haproxy)
+	currentPatroniNodes := 0
+	var patroniNodeIDs []string
+	for _, node := range nodes {
+		if node.Role == "primary" || node.Role == "replica" {
+			currentPatroniNodes++
+			patroniNodeIDs = append(patroniNodeIDs, node.ID)
+		}
+	}
+
+	s.logger.Info("current cluster state",
+		zap.Int("current_nodes", currentPatroniNodes),
+		zap.Int("target_nodes", req.NodeCount))
+
+	if req.NodeCount == currentPatroniNodes {
+		return fmt.Errorf("cluster already has %d nodes", currentPatroniNodes)
+	}
+
+	// Scale UP: Add nodes
+	if req.NodeCount > currentPatroniNodes {
+		nodesToAdd := req.NodeCount - currentPatroniNodes
+		s.logger.Info("scaling up", zap.Int("nodes_to_add", nodesToAdd))
+
+		for i := 0; i < nodesToAdd; i++ {
+			addReq := dto.AddNodeRequest{}
+			result, err := s.AddNode(ctx, clusterID, addReq)
+			if err != nil {
+				return fmt.Errorf("failed to add node %d/%d: %w", i+1, nodesToAdd, err)
+			}
+			s.logger.Info("added node", zap.String("node_id", result.NodeID), zap.String("node_name", result.NodeName))
+		}
+	}
+
+	// Scale DOWN: Remove replica nodes
+	if req.NodeCount < currentPatroniNodes {
+		nodesToRemove := currentPatroniNodes - req.NodeCount
+		s.logger.Info("scaling down", zap.Int("nodes_to_remove", nodesToRemove))
+
+		// Get replica nodes (we cannot remove primary)
+		var replicaNodeIDs []string
+		for _, node := range nodes {
+			if node.Role == "replica" {
+				replicaNodeIDs = append(replicaNodeIDs, node.ID)
+			}
+		}
+
+		if len(replicaNodeIDs) < nodesToRemove {
+			return fmt.Errorf("cannot remove %d nodes: only %d replicas available (cannot remove primary)", nodesToRemove, len(replicaNodeIDs))
+		}
+
+		// Remove nodes from the end
+		for i := 0; i < nodesToRemove; i++ {
+			nodeToRemove := replicaNodeIDs[len(replicaNodeIDs)-1-i]
+			removeReq := dto.RemoveNodeRequest{
+				NodeID: nodeToRemove,
+				Force:  false,
+			}
+			result, err := s.RemoveNode(ctx, clusterID, removeReq)
+			if err != nil {
+				return fmt.Errorf("failed to remove node %d/%d: %w", i+1, nodesToRemove, err)
+			}
+			s.logger.Info("removed node", zap.String("node_id", result.NodeID))
+		}
+	}
+
+	// Invalidate cache
+	s.cacheService.InvalidateClusterInfo(ctx, clusterID)
+
+	s.logger.Info("cluster scaled successfully",
+		zap.String("cluster_id", clusterID),
+		zap.Int("from", currentPatroniNodes),
+		zap.Int("to", req.NodeCount))
+
+	return nil
 }
 
 // AddNode adds a new replica node to the cluster
@@ -736,10 +935,9 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 	}
 
 	patroniNodeCount := 0
-	maxIndex := 0
 	var etcdNode *entities.ClusterNode
 	var existingPatroniNode *entities.ClusterNode
-	networkName := ""
+	networkName := cluster.NetworkID
 
 	for _, node := range nodes {
 		if node.Role == "primary" || node.Role == "replica" {
@@ -748,23 +946,10 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 				nodeCopy := node
 				existingPatroniNode = &nodeCopy
 			}
-			if node.ContainerID != "" {
-				inspect, err := s.dockerSvc.InspectContainer(ctx, node.ContainerID)
-				if err == nil && inspect != nil {
-					networkName = getNetworkNameFromContainer(inspect)
-					name := inspect.Name
-					if strings.Contains(name, "patroni-node-") {
-						var idx int
-						fmt.Sscanf(name, "/iaas-patroni-%s-patroni-node-%d", new(string), &idx)
-						if idx > maxIndex {
-							maxIndex = idx
-						}
-					}
-				}
-			}
 		}
 		if node.Role == "etcd" && etcdNode == nil {
-			etcdNode = &node
+			nodeCopy := node
+			etcdNode = &nodeCopy
 		}
 	}
 
@@ -772,8 +957,22 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		return nil, fmt.Errorf("no etcd node found in cluster")
 	}
 
+	// Get cluster name from infrastructure
+	clusterName := ""
+	if cluster.InfrastructureID != "" {
+		infra, _ := s.infraRepo.FindByID(cluster.InfrastructureID)
+		if infra != nil {
+			clusterName = infra.Name
+		}
+	}
+
+	// Use project-based network naming for Docker Desktop grouping
 	if networkName == "" {
-		networkName = fmt.Sprintf("iaas-cluster-%s", clusterID)
+		if clusterName != "" {
+			networkName = fmt.Sprintf("pg-cluster-%s_default", clusterName)
+		} else {
+			networkName = fmt.Sprintf("iaas-cluster-%s", clusterID)
+		}
 	}
 
 	// Check max nodes limit
@@ -781,15 +980,24 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		return nil, fmt.Errorf("maximum 10 nodes reached")
 	}
 
-	newIndex := maxIndex
+	shortID := cluster.ID[:8]
+	newIndex := patroniNodeCount + 1
 	nodeID := uuid.New().String()
+
+	// Project name for Docker Desktop grouping
+	projectName := fmt.Sprintf("pg-cluster-%s", clusterName)
+	if clusterName == "" {
+		projectName = fmt.Sprintf("pg-cluster-%s", shortID)
+	}
+
+	// Generate node name with proper naming convention
 	nodeName := req.NodeName
 	if nodeName == "" {
-		nodeName = fmt.Sprintf("patroni-node-%d", newIndex+1)
+		nodeName = fmt.Sprintf("%s-node%d", projectName, newIndex)
 	}
-	containerName := fmt.Sprintf("iaas-patroni-%s-%s", cluster.ID, nodeName)
-	volumeName := fmt.Sprintf("iaas-patroni-data-%s-%s", cluster.ID, nodeName)
-	backupVolumeName := fmt.Sprintf("iaas-pgbackrest-%s-%s", cluster.ID, nodeName)
+	containerName := nodeName
+	volumeName := fmt.Sprintf("pg-%s-data-%d", shortID, newIndex+1)
+	backupVolumeName := fmt.Sprintf("pg-%s-backup-%d", shortID, newIndex+1)
 
 	// Create volumes
 	if err := s.dockerSvc.CreateVolume(ctx, volumeName); err != nil {
@@ -799,17 +1007,14 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		return nil, fmt.Errorf("failed to create backup volume: %w", err)
 	}
 
-	// Get cluster scope from existing node
-	scope := "admin"       // Default scope
-	namespace := "default" // Default namespace
-	if cluster.InfrastructureID != "" {
-		infra, _ := s.infraRepo.FindByID(cluster.InfrastructureID)
-		if infra != nil {
-			scope = infra.Name
-		}
+	// Get cluster scope from existing node - use clusterName for proper Patroni scope
+	scope := clusterName
+	if scope == "" {
+		scope = "admin" // Fallback
 	}
+	namespace := "percona_lab" // Default namespace same as createPatroniNode
 
-	// Get namespace from existing patroni container
+	// Get namespace from existing patroni container for consistency
 	if existingPatroniNode != nil && existingPatroniNode.ContainerID != "" {
 		inspect, err := s.dockerSvc.InspectContainer(ctx, existingPatroniNode.ContainerID)
 		if err == nil && inspect != nil {
@@ -818,16 +1023,23 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 					namespace = envVar[10:]
 					break
 				}
+				// Also get SCOPE for consistency
+				if len(envVar) > 6 && envVar[:6] == "SCOPE=" {
+					scope = envVar[6:]
+				}
 			}
 		}
 	}
+
+	// etcd host should use container name with network alias
+	etcdHost := fmt.Sprintf("%s-etcd:2379", projectName)
 
 	// Build environment variables for new replica
 	env := []string{
 		fmt.Sprintf("SCOPE=%s", scope),
 		fmt.Sprintf("NAMESPACE=%s", namespace),
 		fmt.Sprintf("PATRONI_NAME=%s", nodeName),
-		"ETCD_HOST=etcd-1:2379",
+		fmt.Sprintf("ETCD_HOST=%s", etcdHost),
 		fmt.Sprintf("POSTGRES_PASSWORD=%s", cluster.Password),
 		"REPLICATION_PASSWORD=replicator_pass",
 		"MAX_CONNECTIONS=100",
@@ -843,7 +1055,7 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 
 	config := docker.ContainerConfig{
 		Name:  containerName,
-		Image: "iaas-patroni-postgres:17",
+		Image: "postgre_db", // Patroni-based PostgreSQL HA image (same as createPatroniNode)
 		Env:   env,
 		Ports: map[string]string{"5432": "0", "8008": "0"},
 		Volumes: map[string]string{
@@ -852,6 +1064,13 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		},
 		Network:      networkName,
 		NetworkAlias: nodeName,
+		Labels: map[string]string{
+			"cluster_id":                 cluster.ID,
+			"cluster_type":               "postgres_cluster",
+			"role":                       "replica",
+			"com.docker.compose.project": projectName,
+			"com.docker.compose.service": "postgres-replica",
+		},
 		Resources: docker.ResourceConfig{
 			CPULimit:    1000000000,        // 1 CPU
 			MemoryLimit: 512 * 1024 * 1024, // 512MB
@@ -900,8 +1119,14 @@ func (s *postgreSQLClusterService) AddNode(ctx context.Context, clusterID string
 		return nil, fmt.Errorf("failed to save node: %w", err)
 	}
 
+	// Register container for monitoring service
+	s.cacheService.RegisterContainerForMonitoring(ctx, nodeID, containerID)
+
 	// Invalidate cache
 	s.cacheService.InvalidateClusterInfo(ctx, clusterID)
+
+	// Publish node_added event to Kafka
+	s.publishEvent(ctx, "node_added", cluster.InfrastructureID, clusterID, "running")
 
 	s.logger.Info("added new replica node",
 		zap.String("node_id", nodeID),
@@ -926,7 +1151,7 @@ func (s *postgreSQLClusterService) RemoveNode(ctx context.Context, clusterID str
 		zap.String("node_id", req.NodeID))
 
 	// Get cluster info
-	_, err := s.clusterRepo.FindByID(clusterID)
+	cluster, err := s.clusterRepo.FindByID(clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("cluster not found: %w", err)
 	}
@@ -995,6 +1220,9 @@ func (s *postgreSQLClusterService) RemoveNode(ctx context.Context, clusterID str
 	}
 
 	s.cacheService.InvalidateClusterInfo(ctx, clusterID)
+
+	// Publish node_removed event to Kafka
+	s.publishEvent(ctx, "node_removed", cluster.InfrastructureID, clusterID, "running")
 
 	s.logger.Info("removed node from cluster",
 		zap.String("node_id", req.NodeID),
